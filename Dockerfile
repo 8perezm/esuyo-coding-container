@@ -9,7 +9,7 @@
 #   EXTRA_NPM_PACKAGES  Space separated list of extra global npm packages
 #   INSTALL_PLAYWRIGHT  "true" (default) or "false"
 
-ARG BASE_IMAGE=ubuntu:24.04
+ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
 
 ARG NODE_VERSION=22

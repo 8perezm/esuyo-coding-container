@@ -2,7 +2,7 @@
 
 > Spin up a ready-to-code SSH container on your k3s cluster in one command.
 
-`coding-container` gives every project its own consistent coding environment. One command deploys a container with Ubuntu 24.04, Node.js 22, [opencode](https://opencode.ai), [pi](https://pi.dev), [herdr](https://herdr.dev), turbo, Playwright, and common dev tools (plus pnpm/yarn via corepack and a Postgres client) to your k3s cluster. You SSH in and land in `/workspace` — a folder backed by your NAS, so your work survives restarts and stays separate per project.
+`coding-container` gives every project its own consistent coding environment. One command deploys a container with Ubuntu 26.04, Node.js 22, [opencode](https://opencode.ai), [pi](https://pi.dev), [herdr](https://herdr.dev), turbo, Playwright, and common dev tools (plus pnpm/yarn via corepack and a Postgres client) to your k3s cluster. You SSH in and land in `/workspace` — a folder backed by your NAS, so your work survives restarts and stays separate per project.
 
 ## Features
 
@@ -67,7 +67,7 @@ For everything else — web URLs, databases, image versions, all commands and fl
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).
 
 ## Developer Documentation
 

@@ -9,7 +9,7 @@ How `coding-container` works: a Node.js CLI that turns one YAML config into a ru
 | Runtime | Node.js >= 18, ES modules (`"type": "module"`) |
 | CLI parsing | [commander.js](https://github.com/tj/commander.js) |
 | Config parsing | [js-yaml](https://github.com/nodeca/js-yaml) (v4) |
-| Container | Docker (ubuntu:24.04 base, sshd, Node 22, opencode, pi, Playwright) |
+| Container | Docker (ubuntu:26.04 base, sshd, Node 22, opencode, pi, Playwright) |
 | Orchestration | k3s via `kubectl` (manifests rendered in-process, applied from stdin) |
 | Storage | NFS volume per project (one subfolder per project) |
 

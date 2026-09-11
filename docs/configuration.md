@@ -30,7 +30,7 @@ image:
   dockerfile: <global-config-dir>/Dockerfile   # copied here by setup (absolute path)
   context: <global-config-dir>                # the build context is the global folder
   buildArgs:
-    BASE_IMAGE: ubuntu:24.04
+    BASE_IMAGE: ubuntu:26.04
     NODE_VERSION: "22"
     EXTRA_APT_PACKAGES: ""     # e.g. "tmux sqlite3"
     EXTRA_NPM_PACKAGES: ""     # e.g. "pnpm yarn"

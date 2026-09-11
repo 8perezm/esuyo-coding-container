@@ -62,7 +62,7 @@ The build installs are intended to fail fast: opencode, pi, herdr, and turbo are
 
 One knob exists in the Dockerfile but not in the shipped config templates: `INSTALL_PLAYWRIGHT` (default `true`). Add `INSTALL_PLAYWRIGHT: "false"` to `image.buildArgs` in a config to skip the Playwright + Chromium install (faster builds, smaller image, no browser in the container).
 
-Packaging gotchas the current Dockerfile already works around: Ubuntu 24.04 ships `fd` as `/usr/bin/fdfind` (the symlink handles that and `/usr/bin/fd-find` for other base images), and opencode installs into `/root/.opencode/bin`, which is added to `PATH` via `ENV` and `/etc/profile.d` so non-interactive shells see it. If you change `BASE_IMAGE`, re-check both.
+Packaging gotchas the current Dockerfile already works around: Ubuntu 26.04 ships `fd` as `/usr/bin/fdfind` (the symlink handles that and `/usr/bin/fd-find` for other base images), and opencode installs into `/root/.opencode/bin`, which is added to `PATH` via `ENV` and `/etc/profile.d` so non-interactive shells see it. If you change `BASE_IMAGE`, re-check both.
 
 ## Debugging tips
 
