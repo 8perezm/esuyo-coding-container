@@ -1,0 +1,27 @@
+# Project-specific configuration for this repo's own container.
+#
+# Shared settings (registry, image build, k8s, nfs, ssh) come from the
+# global config at ~/.config/esuyo-coding-container/config.yaml; CLI flags override
+# everything. Add keys here only for values that differ per project.
+
+project: my-project
+
+k8s:
+  nodePort: 30022
+
+# Expose container ports to the browser through Traefik: one Ingress host per
+# port, each routing to that port on this project's service. The hosts must
+# resolve (DNS) to your Traefik LoadBalancer IP. An optional nodePort
+# (30000-32767) additionally reaches the port on every cluster node at
+# http://<node-ip>:<nodePort>/ (unique across ssh, web.ports, sidecars).
+# web:
+#   ports:
+#     - { port: 3000, host: my-web.example.com, nodePort: 30080 }
+#     - { port: 8080, host: my-api.example.com, name: api }
+
+# Extra NAS folders mounted into the container alongside /workspace. Each
+# subPath is a subfolder of nfs.basePath (created on first mount if missing);
+# readOnly: true makes the mount read-only for the container.
+# nfs:
+#   volumes:
+#     - { subPath: shared-datasets, mountPath: /data, readOnly: true }

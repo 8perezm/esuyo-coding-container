@@ -1,0 +1,6 @@
+.opencode/*
+node_modules/
+keys/
+*.pem
+test/fixtures.local.mjs
+config.local.yaml
