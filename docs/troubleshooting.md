@@ -25,7 +25,7 @@ Almost always the NFS mount: a k3s node can't reach `10.0.0.5`, or `nfs.basePath
 The pod isn't running yet (`kubectl -n coding get pods`), or kubectl can't reach the cluster. A busy local port 2222 is no longer a problem — the CLI switches to a free port automatically.
 
 **SSH complains that the host key changed after a rebuild**
-In practice it won't: pod host keys rotate with every image build, so the CLI auto-accepts new keys into a per-project file (`~/.config/coding-container/keys/<project>-known_hosts`) instead of your global `~/.ssh/known_hosts`.
+Current versions never store pod host keys (alias uses the OS null device), so there is nothing to go stale. If you still have a legacy `~/.config/coding-container/keys/<project>-known_hosts` file from an older version, run `coding-container deploy` (or `ssh`) once — it deletes the file and rewrites the alias. Still seeing `Port forwarding is disabled` in VS Code after that means the alias wasn't rewritten yet.
 
 **Nodes keep using an old image after a rebuild**
 Should not happen: the pod spec uses `imagePullPolicy: Always`, so every new pod re-checks the registry before starting. If a pod still runs an old image, the deployment's image string didn't change, so no new pod was created — check it with `kubectl -n coding get deployment <project> -o jsonpath='{.spec.template.spec.containers[0].image}'` and force one with `kubectl -n coding rollout restart deployment/<project>`.
@@ -58,4 +58,5 @@ kubectl -n coding get deploy,svc,cm,pod -l coding-container=true
 
 - [Configuration](./configuration.md) — registry, NFS, and NodePort settings
 - [SSH and VS Code](./ssh-and-vscode.md) — connection fixes
+- [SSH image paste](./ssh-image-paste.md) — image paste into opencode over SSH
 - [Development Guide](./development.md) — debugging the CLI itself

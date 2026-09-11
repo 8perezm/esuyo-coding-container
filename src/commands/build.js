@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { dockerExec, run } from "../utils/exec.js";
 import { imageRef } from "../config.js";
 
@@ -7,6 +8,18 @@ import { imageRef } from "../config.js";
  * global image).
  */
 export async function buildImage(cfg) {
+  if (!cfg.image.dockerfilePath || !fs.existsSync(cfg.image.dockerfilePath)) {
+    throw new Error(
+      `config: dockerfile not found: ${cfg.image.dockerfilePath ?? "(unset)"}. ` +
+        `Run 'coding-container setup' to provision one, or fix image.dockerfile in your config.`
+    );
+  }
+  if (!cfg.image.contextPath || !fs.existsSync(cfg.image.contextPath)) {
+    throw new Error(
+      `config: build context not found: ${cfg.image.contextPath ?? "(unset)"}. ` +
+        `Fix image.context in your config.`
+    );
+  }
   const ref = imageRef(cfg);
   const args = ["build", "-t", ref, "-f", cfg.image.dockerfilePath];
   for (const [key, value] of Object.entries(cfg.image.buildArgs || {})) {

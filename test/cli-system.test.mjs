@@ -171,8 +171,8 @@ before(async () => {
   xdg = path.join(tmp, "xdg");
   fs.mkdirSync(xdg, { recursive: true });
   writeStubs();
-  // Global-mode project config: no image.* keys (dockerfile resolves against
-  // this dir, so copy the repo's Dockerfile here for config validation).
+  // Global-mode project config: no image.* keys. Only `system create`
+  // (the image build) needs a Dockerfile, so copy the repo's one here.
   fs.copyFileSync(path.join(ROOT, "Dockerfile"), path.join(tmp, "Dockerfile"));
   configPath = path.join(tmp, "config.yaml");
   fs.writeFileSync(

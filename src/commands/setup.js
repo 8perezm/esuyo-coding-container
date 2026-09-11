@@ -17,7 +17,7 @@ function yamlValue(v) {
   return JSON.stringify(v);
 }
 
-function renderTemplate(dir, values) {
+function renderTemplate(values) {
   return `# coding-container global configuration (created by 'coding-container setup')
 #
 # Shared by every project. Layering, lowest to highest priority:
@@ -26,7 +26,7 @@ function renderTemplate(dir, values) {
 # Relative paths in this file resolve against this file's directory.
 # The Dockerfile and the SSH key pair live next to this file:
 #   Dockerfile - the image build (copied here from the repo on first run)
-#   keys/      - the shared SSH key pair (per-project known_hosts alongside)
+#   keys/      - the shared SSH key pair (host keys are ephemeral, never stored)
 
 image:
   registry: ${yamlValue(values.registry)}
@@ -37,8 +37,10 @@ image:
   #   coding-container system get                 (show current/previous/maxEver)
   # Set tag in a project config to pin that project to one global version.
   # Single image build shared by all projects (Dockerfile copied next to this file).
-  dockerfile: ${path.join(dir, "Dockerfile")}
-  context: ${dir}
+  # Relative paths resolve against this file's directory, so this config
+  # survives renames/moves of the config folder.
+  dockerfile: Dockerfile
+  context: .
   buildArgs:
     BASE_IMAGE: ubuntu:26.04
     NODE_VERSION: "22"
@@ -175,7 +177,7 @@ export async function setup(opts = {}) {
     console.log(`kept:    ${cfgFile} (already exists, left untouched)`);
   } else {
     const values = await captureEnvironment(opts);
-    fs.writeFileSync(cfgFile, renderTemplate(dir, values));
+    fs.writeFileSync(cfgFile, renderTemplate(values));
     console.log(`created: ${cfgFile}`);
   }
 

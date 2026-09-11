@@ -10,6 +10,7 @@ import { push } from "./commands/push.js";
 import { deploy } from "./commands/deploy.js";
 import { create } from "./commands/create.js";
 import { ssh } from "./commands/ssh.js";
+import { listSsh, listUpdateSsh } from "./commands/list.js";
 import { gc } from "./commands/gc.js";
 import { deleteProject } from "./commands/delete.js";
 import { validate } from "./commands/validate.js";
@@ -132,6 +133,23 @@ program
   .action(async (opts) => {
     const cfg = cfgFrom();
     await ssh(cfg, { direct: opts.direct });
+  });
+
+const list = program
+  .command("list")
+  .description("list the SSH connections registered by coding-container (aliases in ~/.ssh/config)")
+  .action(() => {
+    listSsh();
+  });
+
+list
+  .command("update")
+  .description(
+    "refresh the SSH aliases from the live cluster (Ready node IP + service nodePorts; fixes stale entries after nodes change)"
+  )
+  .option("--dry-run", "show what would change without writing anything")
+  .action(async (opts) => {
+    await listUpdateSsh({ dryRun: opts.dryRun });
   });
 
 program

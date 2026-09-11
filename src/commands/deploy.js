@@ -4,7 +4,7 @@ import { ensureKeyPair, readPublicKey } from "../utils/keys.js";
 import { ensurePullSecret } from "../utils/registry.js";
 import { fullManifest, webPorts, sidecarNodePorts as sidecarNodePortsList } from "../utils/manifest.js";
 import { imageRef } from "../config.js";
-import { addHostEntry, sshAlias, sshConfigPath } from "../utils/ssh-config.js";
+import { addHostEntry, ephemeralKnownHostsFile, removeLegacyKnownHostsFile, sshAlias, sshConfigPath } from "../utils/ssh-config.js";
 import { findNodePortOwner } from "../utils/project.js";
 import { kubectlExec, resolveDeployTag, SYSTEM_CM_NAME } from "../utils/system-config.js";
 
@@ -117,6 +117,8 @@ export async function deploy(cfg, { wait = true } = {}) {
   }
 
   // Register an SSH alias for the container (VS Code Remote-SSH / ssh).
+  // Host keys are ephemeral, so the alias points at the OS null device and
+  // any legacy per-project known_hosts file is removed.
   if (nodeIp) {
     try {
       const alias = sshAlias(cfg.project);
@@ -126,8 +128,11 @@ export async function deploy(cfg, { wait = true } = {}) {
         port: cfg.k8s.nodePort,
         user: cfg.ssh.user,
         identityFile: path.join(cfg.ssh.keyDirPath, cfg.ssh.keyName),
-        knownHostsFile: path.join(cfg.ssh.keyDirPath, `${cfg.project}-known_hosts`),
+        knownHostsFile: ephemeralKnownHostsFile(),
       });
+      if (removeLegacyKnownHostsFile(cfg.ssh.keyDirPath, cfg.project)) {
+        console.log(`Removed stale known_hosts for "${cfg.project}"`);
+      }
       console.log(`SSH alias "${alias}" written to ${sshConfigPath()} (connect: ssh ${alias})`);
     } catch (err) {
       console.warn(`Warning: could not update SSH config: ${err.message}`);

@@ -18,6 +18,40 @@ export function sshAlias(project) {
   return `coding-${project}`;
 }
 
+/**
+ * Pod host keys are ephemeral (regenerated on every image build), so there
+ * is no point in persisting them. Pointing UserKnownHostsFile at the OS null
+ * device means a rebuilt image can never leave a stale key behind to break
+ * clients that need forwarding (VS Code Remote-SSH disables forwarding after
+ * a host-key change even with StrictHostKeyChecking=no).
+ */
+export function ephemeralKnownHostsFile() {
+  return process.platform === "win32" ? "NUL" : "/dev/null";
+}
+
+/**
+ * Pre-null-device location of a project's host keys. Kept only so commands
+ * can clean up the legacy file once.
+ */
+export function legacyKnownHostsFile(keyDirPath, project) {
+  return path.join(keyDirPath, `${project}-known_hosts`);
+}
+
+/**
+ * Delete the legacy per-project known_hosts file if it exists.
+ * Returns true when a file was removed.
+ */
+export function removeLegacyKnownHostsFile(keyDirPath, project) {
+  const file = legacyKnownHostsFile(keyDirPath, project);
+  try {
+    if (!fs.existsSync(file)) return false;
+    fs.rmSync(file, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readManaged(file) {
   if (!fs.existsSync(file)) return { before: "", entries: {}, after: "" };
   const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
@@ -80,4 +114,37 @@ export function removeHostEntry(alias, file = sshConfigPath()) {
   delete entries[alias];
   writeManaged(file, before, entries, after);
   return true;
+}
+
+/**
+ * Parse one managed Host block (array of raw lines, first is `Host <alias>`)
+ * into a structured entry. Unknown keys are ignored; missing keys stay undefined.
+ */
+function parseHostBlock(alias, lines) {
+  const entry = { alias };
+  for (const line of lines.slice(1)) {
+    const m = line.trim().match(/^(\S+)\s+(.*\S)\s*$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const value = m[2];
+    if (key === "hostname") entry.hostName = value;
+    else if (key === "port") entry.port = value;
+    else if (key === "user") entry.user = value;
+    else if (key === "identityfile") entry.identityFile = value;
+    else if (key === "userknownhostsfile") entry.knownHostsFile = value;
+    else if (key === "stricthostkeychecking") entry.strictHostKeyChecking = value;
+  }
+  return entry;
+}
+
+/**
+ * List the container host entries in the managed section, sorted by alias.
+ * Returns [] when the ssh config (or the managed block) is missing.
+ * Each entry is { alias, hostName?, port?, user?, identityFile?, ... }.
+ */
+export function listHostEntries(file = sshConfigPath()) {
+  const { entries } = readManaged(file);
+  return Object.entries(entries)
+    .map(([alias, lines]) => parseHostBlock(alias, lines))
+    .sort((a, b) => a.alias.localeCompare(b.alias));
 }

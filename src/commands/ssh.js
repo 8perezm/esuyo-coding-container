@@ -1,7 +1,7 @@
 import net from "node:net";
-import path from "node:path";
 import { exec, run, start } from "../utils/exec.js";
 import { ensureKeyPair } from "../utils/keys.js";
+import { ephemeralKnownHostsFile, removeLegacyKnownHostsFile } from "../utils/ssh-config.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,9 +34,10 @@ async function waitForReady(child, ms = 15000) {
 }
 
 /**
- * Per-project known_hosts file so ephemeral pod host keys (regenerated on
- * every image build) never pollute the user's global known_hosts, and a
- * changed key never blocks the connection.
+ * Pod host keys are ephemeral (regenerated on every image build), so host
+ * keys are never persisted (UserKnownHostsFile -> OS null device). A stored
+ * key would go stale after a rebuild and VS Code Remote-SSH would refuse
+ * forwarding with "Port forwarding is disabled".
  */
 function sshCommonOptions(cfg, port, privateKey) {
   return [
@@ -47,7 +48,7 @@ function sshCommonOptions(cfg, port, privateKey) {
     "-o",
     "StrictHostKeyChecking=no",
     "-o",
-    `UserKnownHostsFile=${path.join(cfg.ssh.keyDirPath, `${cfg.project}-known_hosts`)}`,
+    `UserKnownHostsFile=${ephemeralKnownHostsFile()}`,
   ];
 }
 
@@ -63,6 +64,10 @@ async function sshDirect(cfg, privateKey) {
 
 export async function ssh(cfg, { direct = false } = {}) {
   const { private: privateKey } = ensureKeyPair(cfg.ssh.keyDirPath, cfg.ssh.keyName);
+  // One-time cleanup of the pre-null-device file so a stale key left over
+  // from before the switch can't break VS Code / Zed aliases still
+  // pointing at it until the next deploy rewrites them.
+  removeLegacyKnownHostsFile(cfg.ssh.keyDirPath, cfg.project);
 
   if (direct) {
     await sshDirect(cfg, privateKey);

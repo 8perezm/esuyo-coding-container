@@ -1,5 +1,5 @@
 import { run } from "../utils/exec.js";
-import { removeHostEntry, sshAlias, sshConfigPath } from "../utils/ssh-config.js";
+import { removeHostEntry, removeLegacyKnownHostsFile, sshAlias, sshConfigPath } from "../utils/ssh-config.js";
 
 export async function deleteProject(cfg, { keepSecrets = false } = {}) {
   const ns = cfg.k8s.namespace;
@@ -21,4 +21,5 @@ export async function deleteProject(cfg, { keepSecrets = false } = {}) {
   } catch (err) {
     console.warn(`Warning: could not update SSH config: ${err.message}`);
   }
+  removeLegacyKnownHostsFile(cfg.ssh.keyDirPath, cfg.project);
 }

@@ -10,6 +10,8 @@ Every `coding-container` command and its most useful flags.
 | `coding-container push` | Push the project's custom image (global-mode projects: use `system create`) |
 | `coding-container deploy` | Apply the k8s manifests and wait for the rollout (global mode: floats on the cluster's current version) |
 | `coding-container ssh` | Open an SSH session (via `kubectl port-forward`) |
+| `coding-container list` | List the SSH connections registered in `~/.ssh/config`, ordered by host then port (read-only, no cluster needed) |
+| `coding-container list update` | Refresh the SSH aliases from the live cluster (Ready node IP + service nodePorts; `--dry-run` to preview) |
 | `coding-container key` | Show or generate the SSH key pair |
 | `coding-container validate` | Load and validate the config without changing anything (`--manifest` prints the rendered k8s manifests) |
 | `coding-container delete` | Remove deployment, service, Ingress, `<project>-ssh` ConfigMap and `<project>-env` Secret, and the SSH alias (alias: `destroy`) |
@@ -37,7 +39,10 @@ Useful flags:
     --no-wait          don't block on the rollout
 
 # ssh
-    --direct           connect via node IP + nodePort instead of port-forward
+     --direct           connect via node IP + nodePort instead of port-forward
+
+# list update
+     --dry-run          show what would change without writing anything
 
 # key
     --force            regenerate the key pair (rotate access)

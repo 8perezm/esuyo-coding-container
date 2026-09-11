@@ -222,7 +222,7 @@ export function loadConfig(configPath, overrides = {}) {
   }
 
   // Default key location: keys/ inside the global config dir (shared key
-  // pair for all projects; per-project known_hosts files live alongside).
+  // pair for all projects; host keys are ephemeral and never stored).
   if (!cfg.ssh.keyDirPath) cfg.ssh.keyDirPath = path.join(gDir, "keys");
   // `${VAR}` expansion (local shell -> config) is scoped to env-ish fields
   // only, so hosts/paths/ports can never surprise-expand. Missing variables
@@ -249,9 +249,11 @@ function validate(cfg) {
   if (!cfg.image.name) {
     throw new Error("config: image.name is required");
   }
-  if (!fs.existsSync(cfg.image.dockerfilePath)) {
-    throw new Error(`config: dockerfile not found: ${cfg.image.dockerfilePath}`);
-  }
+  // NOTE: the Dockerfile is intentionally NOT checked here. Only the build
+  // path (buildImage, used by `build`, custom-mode `create` and
+  // `system create`) needs it; `deploy`/`validate`/`ssh`/etc. in global mode
+  // run fine without one, so requiring it here would break deploys over a
+  // stale or missing Dockerfile.
   if (!cfg.nfs.server) {
     throw new Error(
       "config: nfs.server is not set. Run 'coding-container setup' " +

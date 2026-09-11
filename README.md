@@ -84,6 +84,7 @@ MIT — see [LICENSE](./LICENSE).
 - [Sidecars](./docs/sidecars.md) — Databases, queues, and other pod companions
 - [CLI reference](./docs/cli-reference.md) — All commands and flags
 - [SSH and VS Code](./docs/ssh-and-vscode.md) — Key rotation and Remote-SSH setup
+- [SSH image paste](./docs/ssh-image-paste.md) — Clipboard images into opencode over SSH
 - [Troubleshooting](./docs/troubleshooting.md) — Common failures and fixes
 - [Architecture](./docs/architecture.md) — Tech stack and system design
 - [Project Structure](./docs/project-structure.md) — Folder layout
