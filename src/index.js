@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { loadConfig, imageRef, globalConfigPath, resolveDefaultConfigPath } from "./config.js";
 import { setup } from "./commands/setup.js";
 import { build } from "./commands/build.js";
@@ -26,10 +27,13 @@ import { resolveDeployTag } from "./utils/system-config.js";
 
 const program = new Command();
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json");
+
 program
   .name("coding-container")
   .description("Build, publish and deploy SSH-accessible coding containers on k3s")
-  .version("1.0.0")
+  .version(version)
   // Positional options: flags before the subcommand are global, flags after
   // belong to the subcommand. Required so `system create --tag vX.Y.Z` is
   // not swallowed by the global --tag.

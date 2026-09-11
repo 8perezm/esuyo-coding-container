@@ -22,6 +22,13 @@
 ## Installation
 
 ```sh
+npm install -g @esuyo/coding-container
+coding-container --help
+```
+
+Or run from source:
+
+```sh
 npm install
 npm link
 coding-container --help

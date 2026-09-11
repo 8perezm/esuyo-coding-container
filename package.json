@@ -1,5 +1,5 @@
 {
-  "name": "coding-container",
+  "name": "@esuyo/coding-container",
   "version": "1.0.0",
   "description": "CLI to build, publish and deploy SSH-accessible coding containers on k3s",
   "type": "module",
@@ -24,6 +24,14 @@
     "devcontainer"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src/",
+    "Dockerfile",
+    "config.yaml"
+  ],
   "dependencies": {
     "commander": "^12.1.0",
     "js-yaml": "^4.1.0"

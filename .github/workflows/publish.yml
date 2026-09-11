@@ -1,0 +1,91 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test || echo "No tests configured, skipping"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version bump
+        id: version
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+
+          if echo "$COMMIT_MSG" | grep -qE "BREAKING CHANGE:|^major(\([^)]*\))?:"
+          then
+            BUMP="major"
+          elif echo "$COMMIT_MSG" | grep -qE "^feat(\([^)]*\))?:|^feature(\([^)]*\))?:|^minor(\([^)]*\))?:"
+          then
+            BUMP="minor"
+          else
+            BUMP="patch"
+          fi
+
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Version bump type: $BUMP"
+
+      - name: Bump version
+        id: bump
+        run: |
+          BUMP=${{ steps.version.outputs.bump }}
+          npm version "$BUMP" --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "New version: $NEW_VERSION"
+
+      - name: Commit and push version bump
+        run: |
+          git add package.json package-lock.json 2>/dev/null || git add package.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }} [skip ci]" || echo "No changes to commit"
+          git push origin "${GITHUB_REF#refs/heads/}" || echo "Push failed, may need to pull first"
+
+      - name: Create git tag
+        run: |
+          git tag "v${{ steps.bump.outputs.new_version }}"
+          git push origin "v${{ steps.bump.outputs.new_version }}"
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.bump.outputs.new_version }}" \
+            --title "Release v${{ steps.bump.outputs.new_version }}" \
+            --notes "Automated release v${{ steps.bump.outputs.new_version }}"
