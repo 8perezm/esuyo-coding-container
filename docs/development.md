@@ -24,14 +24,14 @@ coding-container --help
 
 (`npm unlink -g coding-container` to remove the global link.)
 
-Config resolution (`resolveDefaultConfigPath()` in `src/config.js`): an explicit `-c/--config` wins, then `./config.yaml` in the current working directory, then `config.yaml` at the repo root. The project config is layered over the global config at `~/.config/esuyo-coding-container/config.yaml`. Relative config paths resolve against each config file's own directory — so you can run commands from any folder.
+Config resolution (`resolveDefaultConfigPath()` in `src/config.js`): an explicit `-c/--config` wins, then `./config.yaml` in the current working directory, then `config.yaml` at the repo root. The project config is layered over the global config at `~/.config/coding-container/config.yaml`. Relative config paths resolve against each config file's own directory — so you can run commands from any folder.
 
 ## Configuration layering
 
 Understanding the merge order is essential when adding config:
 
 1. `DEFAULTS` in `src/config.js` — every key must exist here. Environment-specific keys (`image.registry`, `nfs.server`, `nfs.basePath`) are intentionally blank: they must come from the global config (created by `setup`) and `validate()` fails with a "run setup" message if they're missing.
-2. The **global config** `~/.config/esuyo-coding-container/config.yaml` (honors `XDG_CONFIG_HOME`), if present — shared environment settings.
+2. The **global config** `~/.config/coding-container/config.yaml` (honors `XDG_CONFIG_HOME`), if present — shared environment settings.
 3. The **project config** passed via `-c` (defaults to `<repo>/config.yaml`) — project-specific values.
 4. CLI flags — currently only `project` and `image.tag`, assembled in `cfgFrom()` in `src/index.js`.
 
@@ -42,7 +42,7 @@ Understanding the merge order is essential when adding config:
 1. Create `src/commands/<name>.js` exporting an `async function <name>(cfg, options)` that receives the fully-merged config.
 2. Import it in `src/index.js` and add a `program.command(...)` block; build options with `.option(...)` and call `cfgFrom()` inside the action (see the `create` or `deploy` blocks for the pattern).
 3. Use `run()` for visible subcommands (docker/kubectl/ssh) and `exec()` when you need the stdout; pipe stdin with `runWithInput()`.
-4. Throw `Error` with a human-readable message on failure — the top-level `catch` in `src/index.js:144` handles exit codes.
+4. Throw `Error` with a human-readable message on failure — the top-level `catch` in `src/index.js` handles exit codes.
 
 ## Adding a Kubernetes resource
 
@@ -52,13 +52,13 @@ Understanding the merge order is essential when adding config:
 
 ## Modifying the image
 
-The repo's `Dockerfile` is the packaged **starting point**: `coding-container setup` copies it into the global config folder (`~/.config/esuyo-coding-container/Dockerfile`) on first run, and that **personal copy** is what the build uses. Tweak your copy to change the image — it's yours alone and never gets committed to a project. To improve the starting point that every developer receives, edit the repo's `Dockerfile`. To expose a new knob:
+The repo's `Dockerfile` is the packaged **starting point**: `coding-container setup` copies it into the global config folder (`~/.config/coding-container/Dockerfile`) on first run, and that **personal copy** is what the build uses. Tweak your copy to change the image — it's yours alone and never gets committed to a project. To improve the starting point that every developer receives, edit the repo's `Dockerfile`. To expose a new knob:
 
 1. Add `ARG NAME=default` near the top.
 2. Use it in a `RUN`.
-3. Add `NAME: default` to `image.buildArgs` in the global config (`~/.config/esuyo-coding-container/config.yaml`) **and** to `DEFAULTS.image.buildArgs` in `src/config.js` (they keep in sync manually).
+3. Add `NAME: default` to `image.buildArgs` in the global config (`~/.config/coding-container/config.yaml`) **and** to `DEFAULTS.image.buildArgs` in `src/config.js` (they keep in sync manually).
 
-The build installs fail fast: if the opencode or pi install scripts break, the build should fail, not silently produce a container missing the tools.
+The build installs are intended to fail fast: opencode, pi, herdr, and turbo are installed with version checks (`herdr --version`, corepack `pnpm/yarn --version`) so a broken installer fails the build instead of silently producing a container missing the tools. Note `curl ... | bash/sh` pipes rely on the receiver's exit code — wrap future installs the same way (download-then-run or explicit version check) rather than assuming `pipefail`.
 
 One knob exists in the Dockerfile but not in the shipped config templates: `INSTALL_PLAYWRIGHT` (default `true`). Add `INSTALL_PLAYWRIGHT: "false"` to `image.buildArgs` in a config to skip the Playwright + Chromium install (faster builds, smaller image, no browser in the container).
 
@@ -86,7 +86,7 @@ Packaging gotchas the current Dockerfile already works around: Ubuntu 24.04 ship
   ```
 - **One-shot SSH test without an interactive session** (reliable for automation; a command-less ssh session fed by a pipe can hang):
   ```sh
-   ssh -i ~/.config/esuyo-coding-container/keys/id_ed25519 -p <nodePort> -o StrictHostKeyChecking=no root@<nodeIP> 'bash -lc "pwd; node --version"'
+   ssh -i ~/.config/coding-container/keys/id_ed25519 -p <nodePort> -o StrictHostKeyChecking=no root@<nodeIP> 'bash -lc "pwd; node --version"'
   ```
   `bash -lc` mimics the login shell of a real interactive session, including the `cd /workspace`.
 - **Stale images** — the pod spec uses `imagePullPolicy: Always`, so every new pod re-checks the registry (a pull is a cheap manifest check when the digest is unchanged). There is no unpinned/`latest` path: custom-mode images are always built + pushed with an explicit tag, and global-mode deploys resolve to a semver version from the `coding-system` ConfigMap (the float) or a project pin; with Always, a plain `deploy` never serves a stale cached image.

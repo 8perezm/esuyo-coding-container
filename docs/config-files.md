@@ -1,5 +1,7 @@
 # App config & setup files
 
+> Status: proposal — the current `Dockerfile` `/entrypoint.sh` only recreates `/run/sshd`, republishes container env, and starts sshd. It does **not** symlink dotfiles yet.
+
 Where to put the setup/config files that tools like opencode and other applications expect (e.g. `~/.config/opencode/`, `~/.gitconfig`, dotfiles). This is about **making those files survive** while still landing where the application looks for them.
 
 ## The core rule: only `/workspace` persists
@@ -24,7 +26,7 @@ The remaining question is simply how an application *finds* a file that it expec
    └── .gitconfig
    ```
 
-2. **At container start, the entrypoint symlinks each entry into place:**
+2. **At container start, the entrypoint would symlink each entry into place** (proposed, not yet implemented):
 
    ```
    /root/.config/opencode -> /workspace/.dotfiles/.config/opencode
@@ -40,9 +42,9 @@ The remaining question is simply how an application *finds* a file that it expec
 - **No image rebuild, no extra k8s objects** — unlike baking a `COPY` into the shared `Dockerfile` (one image is shared by *all* projects, so it cannot hold per-project config), and unlike a ConfigMap (1 MiB size limit, awkward for many or binary files).
 - **Works for any app** — symlinks satisfy applications that do *not* honor environment overrides such as `XDG_CONFIG_HOME` or `OPENCODE_CONFIG`.
 
-## Implementation note
+## Implementation note (proposed)
 
-The change is confined to `Dockerfile`'s `/entrypoint.sh`: add a small loop that links `/workspace/.dotfiles/*` into `$HOME`. The NFS mount is available before the entrypoint runs, so timing is not a concern, and the links are cheap to recreate on every boot. Make the dotfiles folder configurable, defaulting to `/workspace/.dotfiles`.
+The change would be confined to `Dockerfile`'s `/entrypoint.sh`: add a small loop that links `/workspace/.dotfiles/*` into `$HOME`. The NFS mount is available before the entrypoint runs, so timing is not a concern, and the links are cheap to recreate on every boot. Make the dotfiles folder configurable, defaulting to `/workspace/.dotfiles`.
 
 ## Per-project vs. global
 

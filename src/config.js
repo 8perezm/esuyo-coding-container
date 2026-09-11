@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 /**
- * Global config directory: $XDG_CONFIG_HOME/esuyo-coding-container or ~/.config/esuyo-coding-container.
+ * Global config directory: $XDG_CONFIG_HOME/coding-container or ~/.config/coding-container.
  * Holds the shared settings (config.yaml) and, by default, the SSH key
  * material (keys/).
  */
@@ -17,7 +17,7 @@ export function globalConfigDir() {
   const base = process.env.XDG_CONFIG_HOME
     ? path.resolve(process.env.XDG_CONFIG_HOME)
     : path.join(os.homedir(), ".config");
-  return path.join(base, "esuyo-coding-container");
+  return path.join(base, "coding-container");
 }
 
 export function globalConfigPath() {
@@ -181,7 +181,7 @@ export function resolveDefaultConfigPath(explicit) {
  *
  * Layers, lowest to highest priority:
  *   1. hardcoded DEFAULTS
-  *   2. global config  (~/.config/esuyo-coding-container/config.yaml, if present)
+  *   2. global config  (~/.config/coding-container/config.yaml, if present)
  *   3. local project config (configPath)
  *   4. CLI overrides (e.g. -p/--project, --tag)
  *

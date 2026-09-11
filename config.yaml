@@ -1,7 +1,7 @@
 # Project-specific configuration for this repo's own container.
 #
 # Shared settings (registry, image build, k8s, nfs, ssh) come from the
-# global config at ~/.config/esuyo-coding-container/config.yaml; CLI flags override
+# global config at ~/.config/coding-container/config.yaml; CLI flags override
 # everything. Add keys here only for values that differ per project.
 
 project: my-project

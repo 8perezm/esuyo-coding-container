@@ -20,8 +20,8 @@ const { deploymentManifest, extraVolumeMounts } = await import("../src/utils/man
 function loadLocal(yamlText, globalText = null) {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (globalText !== null) {
-    fs.mkdirSync(path.join(xdg, "esuyo-coding-container"), { recursive: true });
-    fs.writeFileSync(path.join(xdg, "esuyo-coding-container", "config.yaml"), globalText);
+    fs.mkdirSync(path.join(xdg, "coding-container"), { recursive: true });
+    fs.writeFileSync(path.join(xdg, "coding-container", "config.yaml"), globalText);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "volumes-test-cfg-"));
   const file = path.join(dir, "config.yaml");

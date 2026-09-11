@@ -18,7 +18,7 @@ function yamlValue(v) {
 }
 
 function renderTemplate(dir, values) {
-  return `# esuyo-coding-container global configuration (created by 'coding-container setup')
+  return `# coding-container global configuration (created by 'coding-container setup')
 #
 # Shared by every project. Layering, lowest to highest priority:
 #   built-in defaults -> THIS file -> the project's config.yaml -> CLI flags

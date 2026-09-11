@@ -89,7 +89,7 @@ export function ensureProjectConfig(dir, explicitProject) {
   fs.writeFileSync(
     configPath,
     `# coding-container project config (auto-created by 'coding-container create')
-# Shared settings come from the global config at ~/.config/esuyo-coding-container/config.yaml.
+# Shared settings come from the global config at ~/.config/coding-container/config.yaml.
 project: ${project}
 
 k8s:
