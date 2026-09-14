@@ -79,17 +79,19 @@ export function secretManifest(cfg, { redact = false } = {}) {
 
 /**
  * Normalized web.ports entries: {name, port, hosts, nodePort?}. 'hosts' is
- * the entry's singular 'host' (if any) plus its 'hosts' list, deduplicated;
- * the Ingress renders one rule per host. Names default to web-<port>;
- * nodePort (30000-32767) is an optional service-level knob that also exposes
- * the port on every cluster node.
+ * the entry's 'host' plus its 'hosts' value (each a single host or a list),
+ * deduplicated; the Ingress renders one rule per host. Names default to
+ * web-<port>; nodePort (30000-32767) is an optional service-level knob that
+ * also exposes the port on every cluster node.
  */
 export function webPorts(cfg) {
   return (cfg.web?.ports || []).map((entry) => {
-    const hosts = [
-      ...(entry.host !== undefined ? [entry.host] : []),
-      ...(Array.isArray(entry.hosts) ? entry.hosts : []),
-    ];
+    const hosts = [];
+    for (const value of [entry.host, entry.hosts]) {
+      if (value === undefined) continue;
+      if (Array.isArray(value)) hosts.push(...value);
+      else hosts.push(value);
+    }
     return {
       name: entry.name || `web-${entry.port}`,
       port: entry.port,

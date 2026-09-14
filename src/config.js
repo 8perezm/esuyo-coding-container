@@ -101,9 +101,9 @@ export const DEFAULTS = {
   },
   web: {
     // Container ports to expose to the browser (dev servers, etc.). Each
-    // entry becomes one Traefik Ingress rule per host: the 'hosts' list (or
-    // the singular 'host') routes to that container port on the project's
-    // service. DNS resolution of the hosts is up to you.
+    // entry becomes one Traefik Ingress rule per host: 'host' and/or 'hosts'
+    // (each a single host or a list) route to that container port on the
+    // project's service. DNS resolution of the hosts is up to you.
     // An optional 'nodePort' (30000-32767, unique across ssh, web.ports, and
     // sidecars) additionally exposes the port on every cluster node, for
     // clients that can't use the Ingress hosts.
@@ -525,14 +525,10 @@ function validate(cfg) {
       }
       seenPorts.add(port);
       const hosts = [];
-      if (entry.host !== undefined) hosts.push(entry.host);
-      if (entry.hosts !== undefined) {
-        if (!Array.isArray(entry.hosts)) {
-          throw new Error(
-            `config: web.ports entry for port ${port} 'hosts' must be a list: ${JSON.stringify(entry.hosts)}`
-          );
-        }
-        hosts.push(...entry.hosts);
+      for (const value of [entry.host, entry.hosts]) {
+        if (value === undefined) continue;
+        if (Array.isArray(value)) hosts.push(...value);
+        else hosts.push(value);
       }
       if (hosts.length === 0) {
         throw new Error(
