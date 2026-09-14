@@ -91,6 +91,22 @@ Packaging gotchas the current Dockerfile already works around: Ubuntu 26.04 ship
   `bash -lc` mimics the login shell of a real interactive session, including the `cd /workspace`.
 - **Stale images:** the pod spec uses `imagePullPolicy: Always`, so every new pod re-checks the registry (a pull is a cheap manifest check when the digest is unchanged). There is no unpinned/`latest` path: custom-mode images are always built + pushed with an explicit tag, and global-mode deploys resolve to a semver version from the `coding-system` ConfigMap (the float) or a project pin; with Always, a plain `deploy` never serves a stale cached image.
 
+## Tests
+
+The suite is hermetic (no cluster, registry, docker build or network) and runs with Node's built-in test runner:
+
+```sh
+npm test
+node --test test/gc.test.js     # a single file
+```
+
+- Pure unit tests cover `planGc`/`imageTag` (`test/gc.test.js`), semver (`test/semver.test.js`), the `coding-system` ConfigMap and the tag float (`test/system-config.test.js`), `${VAR}` expansion + Secret rendering (`test/secrets.test.mjs`), docker-credential resolution (`test/registry.test.mjs`), NodePort ownership (`test/nodeport-owner.test.mjs`), and the `nfs.volumes` / `web.ports` / `sidecars` validators + manifest renderers (`test/volumes.test.mjs`, `test/web-nodeports.test.mjs`, `test/sidecar-nodeports.test.mjs`).
+- `test/dockerfile-lazy.test.mjs` pins the lazy-Dockerfile contract: `loadConfig` succeeds with no Dockerfile anywhere on disk, while `buildImage` fails fast on a missing Dockerfile/context.
+- Integration tests (`test/registry-api.test.mjs`, `test/cli-gc.test.mjs`, `test/cli-system.test.mjs`) start an in-process mock Docker Registry and stub the cluster/toolchain by pointing `KUBECTL_BIN` at a `.js` script and `DOCKER_BIN` at a `.js` script, so the real CLI runs end-to-end without a cluster.
+- Optional personal values: copy `test/fixtures.local.example.mjs` to the gitignored `test/fixtures.local.mjs`; `test/personal.mjs` then feeds your real registry/NFS into the same assertions. Leave it absent in CI.
+
+When adding a command or manifest renderer, add a hermetic test next to the existing ones; never hit a real cluster or registry from `npm test`.
+
 ## Conventions
 
 - ES modules only (`import`/`export`), Node built-ins via `node:` prefix.

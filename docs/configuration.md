@@ -27,8 +27,8 @@ image:
   name: coding-container
   # tag: unset in global mode -> deploys float on the cluster's current version
   #      (see 'coding-container system get'). Custom-mode projects must set a tag.
-  dockerfile: <global-config-dir>/Dockerfile   # copied here by setup (absolute path)
-  context: <global-config-dir>                # the build context is the global folder
+  dockerfile: Dockerfile       # relative to this file's dir; setup copies the repo Dockerfile here
+  context: .                   # the build context is the global config folder (keys stay out)
   buildArgs:
     BASE_IMAGE: ubuntu:26.04
     NODE_VERSION: "22"

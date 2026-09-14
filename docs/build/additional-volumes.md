@@ -1,6 +1,6 @@
 # Plan: Additional NFS volumes via config.yaml
 
-> Status: plan only (no code changes).
+> Status: **implemented.** The `nfs.volumes` feature below ships in `src/config.js` (validation), `src/utils/manifest.js` (`extraVolumeMounts()`), the config templates (`config.yaml`, `setup.js`) and `docs/configuration.md`; `test/volumes.test.mjs` covers it. This document is kept as design history (the decisions in §2 still hold). The §6 open questions resolved as: sidecars stay manual via their own `volumeMounts`, mounts under `/workspace` are rejected, and missing `subPath` folders are created on first mount.
 > Source request: "For each volume, I need to be able to set the path on the nfs share, the folders will be subfolders of workspaces folder, I need to be able to set the path in the container, I need to be able mark them as readonly..." (request was cut off at "they", open questions in §6 cover the likely continuations).
 
 ## 1. Goal
