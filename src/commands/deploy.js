@@ -97,7 +97,9 @@ export async function deploy(cfg, { wait = true } = {}) {
   if (web.length) {
     console.log("Web (Traefik Ingress):");
     for (const p of web) {
-      console.log(`  http://${p.host}/  (container port ${p.port})`);
+      for (const host of p.hosts) {
+        console.log(`  http://${host}/  (container port ${p.port})`);
+      }
     }
     const webNodePorts = web.filter((p) => p.nodePort !== undefined);
     if (webNodePorts.length) {

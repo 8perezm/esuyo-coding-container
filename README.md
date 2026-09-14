@@ -1,20 +1,26 @@
 # Esuyo coding-container
 
-> Spin up a ready-to-code SSH container on your k3s cluster in one command.
+Spin up a ready-to-code SSH container on your Kubernetes cluster in one command.
 
-`coding-container` gives every project its own consistent coding environment. One command deploys a container with Ubuntu 26.04, Node.js 22, [opencode](https://opencode.ai), [pi](https://pi.dev), [herdr](https://herdr.dev), turbo, Playwright, and common dev tools (plus pnpm/yarn via corepack and a Postgres client) to your k3s cluster. You SSH in and land in `/workspace` — a folder backed by your NAS, so your work survives restarts and stays separate per project.
+`coding-container` gives every project its own consistent coding environment on Kubernetes.
+One command deploys an SSH-accessible container per project, you land in `/workspace`, backed by your NAS so work survives restarts.
+The default image is just a starting point (Ubuntu, Node.js, and common dev tools); the Dockerfile is yours to customize with any language or toolchain, plus optional sidecars for databases and queues.
+
+For private, internal Kubernetes clusters only. Do not expose to the public web. Every project opens NodePorts on all cluster nodes (SSH plus optional web/sidecar ports) and serves Ingress hosts without authentication or TLS by default. Only run this on a trusted internal network (homelab, LAN, or VPN-gated cluster) behind a firewall. See [Architecture](./docs/architecture.md#security-notes) for details.
 
 ## Features
 
 - One command to deploy a ready-to-code container (`create`), SSH in (`ssh`), and tear down (`delete`)
-- Persistent per-project workspace on your NAS — files survive restarts
+- Kubernetes-native: renders Deployment, Service, Ingress, ConfigMap, and Secret manifests and applies them with `kubectl`
+- Persistent per-project workspace on your NAS, so files survive restarts
 - Generates a dedicated SSH key; VS Code Remote-SSH ready
 - Optional browser access to dev servers and sidecars for databases and queues
-- Shared team image with versioning, or a custom image per project
+- Shared team image with versioning, or a custom image per project. Bring your own Dockerfile for any language or toolchain
 
 ## Prerequisites
 
-- Node.js >= 18, Docker, `kubectl` pointed at your k3s cluster
+- A private, internal Kubernetes cluster (any CNCF-conformant distribution) with `kubectl` access. Do not use on a publicly exposed cluster
+- Node.js >= 18, Docker, `kubectl` on `PATH`
 - `docker login` to your container registry
 - OpenSSH (`ssh`, `ssh-keygen`)
 - Your NAS reachable from the cluster nodes
@@ -58,39 +64,39 @@ See [Configuration](./docs/configuration.md) for layering, multiple projects, an
 
 ```sh
 coding-container create   # deploy this project
-coding-container ssh      # connect — you land in /workspace
+coding-container ssh      # connect, you land in /workspace
 coding-container delete   # remove cluster resources (files stay safe on the NAS)
 ```
 
-Working in another folder? `cd` there and run `create` — a minimal `config.yaml` is scaffolded automatically. Each project gets its own container and workspace.
+Working in another folder? `cd` there and run `create`: a minimal `config.yaml` is scaffolded automatically. Each project gets its own container and workspace.
 
-For everything else — web URLs, databases, image versions, all commands and flags — see [CLI reference](./docs/cli-reference.md) and the guides below.
+For everything else (web URLs, databases, image versions, all commands and flags), see [CLI reference](./docs/cli-reference.md) and the guides below.
 
 ## Troubleshooting
 
 - **Missing registry or NAS settings?** Run `coding-container setup`.
 - **Push auth error?** Run `docker login <your-registry>` first.
-- **Pod stuck?** Usually NFS or image pull — see [Troubleshooting](./docs/troubleshooting.md).
+- **Pod stuck?** Usually NFS or image pull. See [Troubleshooting](./docs/troubleshooting.md).
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).
 
 ## Developer Documentation
 
-- [Configuration](./docs/configuration.md) — Config layering, multiple projects, NAS volumes
-- [Shared global image](./docs/global-image.md) — Team image versions, publishing, rollback, cleanup
-- [Web access](./docs/web-access.md) — Browser access to dev servers via Traefik
-- [Sidecars](./docs/sidecars.md) — Databases, queues, and other pod companions
-- [CLI reference](./docs/cli-reference.md) — All commands and flags
-- [SSH and VS Code](./docs/ssh-and-vscode.md) — Key rotation and Remote-SSH setup
-- [SSH image paste](./docs/ssh-image-paste.md) — Clipboard images into opencode over SSH
-- [Troubleshooting](./docs/troubleshooting.md) — Common failures and fixes
-- [Architecture](./docs/architecture.md) — Tech stack and system design
-- [Project Structure](./docs/project-structure.md) — Folder layout
-- [Development Guide](./docs/development.md) — Local setup for contributors
-- [App config & setup files](./docs/config-files.md) — Persisting tool configs via /workspace
-- [Plan: Additional NFS volumes](./docs/build/additional-volumes.md) — Design history for extra volumes
-- [Plan: Public prebuilt images](./docs/build/public-images.md) — Design history for public images
+- [Configuration](./docs/configuration.md): config layering, multiple projects, NAS volumes
+- [Shared global image](./docs/global-image.md): team image versions, publishing, rollback, cleanup
+- [Web access](./docs/web-access.md): browser access to dev servers via Traefik
+- [Sidecars](./docs/sidecars.md): databases, queues, and other pod companions
+- [CLI reference](./docs/cli-reference.md): all commands and flags
+- [SSH and VS Code](./docs/ssh-and-vscode.md): key rotation and Remote-SSH setup
+- [SSH image paste](./docs/ssh-image-paste.md): clipboard images into opencode over SSH
+- [Troubleshooting](./docs/troubleshooting.md): common failures and fixes
+- [Architecture](./docs/architecture.md): tech stack and system design
+- [Project Structure](./docs/project-structure.md): folder layout
+- [Development Guide](./docs/development.md): local setup for contributors
+- [App config & setup files](./docs/config-files.md): persisting tool configs via /workspace
+- [Plan: Additional NFS volumes](./docs/build/additional-volumes.md): design history for extra volumes
+- [Plan: Public prebuilt images](./docs/build/public-images.md): design history for public images
 
 ---

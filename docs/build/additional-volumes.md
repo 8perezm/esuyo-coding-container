@@ -1,7 +1,7 @@
 # Plan: Additional NFS volumes via config.yaml
 
 > Status: plan only (no code changes).
-> Source request: "For each volume, I need to be able to set the path on the nfs share, the folders will be subfolders of workspaces folder, I need to be able to set the path in the container, I need to be able mark them as readonly..." (request was cut off at "they" — open questions in §6 cover the likely continuations).
+> Source request: "For each volume, I need to be able to set the path on the nfs share, the folders will be subfolders of workspaces folder, I need to be able to set the path in the container, I need to be able mark them as readonly..." (request was cut off at "they", open questions in §6 cover the likely continuations).
 
 ## 1. Goal
 
@@ -15,7 +15,7 @@ nfs:
   basePath: /workspaces
   # existing: subPath pins the /workspace folder (default: project name)
 
-  volumes:                          # NEW — zero or more extra mounts
+  volumes:                          # NEW: zero or more extra mounts
     - subPath: shared-datasets       # NAS folder: <basePath>/shared-datasets
       mountPath: /data               # path inside the coding container
       readOnly: true                 # container cannot write (default: false)
@@ -25,21 +25,21 @@ nfs:
 ```
 
 Each entry needs exactly the three knobs from the request:
-1. `subPath` — folder on the NFS share, always a subfolder of `nfs.basePath`.
-2. `mountPath` — absolute path in the container.
-3. `readOnly` — when `true` the container can read but not write.
+1. `subPath`: folder on the NFS share, always a subfolder of `nfs.basePath`.
+2. `mountPath`: absolute path in the container.
+3. `readOnly`: when `true` the container can read but not write.
 
 ## 2. Design decisions
 
 - **New key: `nfs.volumes` (array, default `[]`).** It lives under `nfs` because
-  every entry reuses `nfs.server` / `nfs.basePath` — no per-volume server/path,
+  every entry reuses `nfs.server` / `nfs.basePath`, so no per-volume server/path,
   matching the request ("subfolders of workspaces folder"). This also keeps
   `deepMerge()` semantics simple (arrays replace wholesale, like `web.ports`
   and `k8s.sidecars`).
 - **Reuse the single `workspace` NFS `Volume`.** The pod today declares one
   Volume (`nfs: { server, path: basePath }`) and mounts it at `/workspace` via
   `subPath`. Extra volumes become extra `volumeMounts` on the **same** Volume
-  with different `subPath` values — no new `volumes[]` entries, one NFS mount
+  with different `subPath` values. No new `volumes[]` entries, one NFS mount
   per subPath, kubelet auto-creates each subfolder on first mount (same as the
   per-project folder today). Alternative (one `Volume` per entry with full
   `path: <basePath>/<subPath>`) is rejected: NFS servers refuse mounts of
@@ -59,7 +59,7 @@ Each entry needs exactly the three knobs from the request:
 - `validate(cfg)`: new `nfs.volumes` block (after the existing `nfs.subPath`
   check), mirroring the style of the `web.ports` / `sidecars` validators:
   - must be an array; each entry must be a plain object.
-  - `subPath`: required non-empty string; same rule as `nfs.subPath` — relative,
+  - `subPath`: required non-empty string; same rule as `nfs.subPath` (relative,
     no leading `/`, no empty or `..` segments
     (`seg === "" || seg === ".."`). Must not equal the resolved
     `workspaceSubPath(cfg)` (would double-mount `/workspace`).
@@ -68,13 +68,13 @@ Each entry needs exactly the three knobs from the request:
     `cfg.container.workdir` or `/root/.ssh/authorized_keys`, and must not be
     nested under another extra mount's `mountPath` (or vice versa) to keep
     kubelet mount order unambiguous. Decide: allow mounts *under* `/workspace`
-    (e.g. `/workspace/data`)? Recommendation: reject — it shadows NFS-with-NFS
+    (e.g. `/workspace/data`)? Recommendation: reject, it shadows NFS-with-NFS
     and confuses git checkouts; document it.
   - `readOnly`: optional boolean, defaults to `false`; reject non-booleans
     (YAML `readOnly: "true"` string must fail, not coerce).
   - Uniqueness: duplicate `subPath` and duplicate `mountPath` each rejected.
   - Normalization: default missing `readOnly` to `false` in the validated object
-    (or normalize in `manifest.js` — pick one place; `manifest.js` keeps config
+    (or normalize in `manifest.js`, pick one place; `manifest.js` keeps config
     round-trippable, so prefer normalizing at render).
 
 ### 3.2 `src/utils/manifest.js`
@@ -141,10 +141,10 @@ kubectl -n coding exec deploy/<project> -- touch /data/should-fail  # readOnly c
 
 1. **Sidecars:** should extra volumes auto-mount into `k8s.sidecars` too, or stay
    coding-only with manual `volumeMounts` (current plan)? If auto, what
-   `mountPath`/`readOnly` — same as coding?
+   `mountPath`/`readOnly`: same as coding?
 2. **Mounts under `/workspace`:** allow (e.g. `/workspace/data`) or reject to
    avoid shadowing the checkout?
 3. **`they ...`:** if the cut-off sentence was e.g. "they should be created even
-   if empty" — already true via kubelet `subPath` creation; if "they should be
-   writable by UID X" or "they need per-volume server" — that changes §2 and
+   if empty", already true via kubelet `subPath` creation; if "they should be
+   writable by UID X" or "they need per-volume server", that changes §2 and
    needs a follow-up before implementation.

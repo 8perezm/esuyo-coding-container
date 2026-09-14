@@ -1,12 +1,12 @@
 # App config & setup files
 
-> Status: proposal — the current `Dockerfile` `/entrypoint.sh` only recreates `/run/sshd`, republishes container env, and starts sshd. It does **not** symlink dotfiles yet.
+> Status: proposal. The current `Dockerfile` `/entrypoint.sh` only recreates `/run/sshd`, republishes container env, and starts sshd. It does **not** symlink dotfiles yet.
 
 Where to put the setup/config files that tools like opencode and other applications expect (e.g. `~/.config/opencode/`, `~/.gitconfig`, dotfiles). This is about **making those files survive** while still landing where the application looks for them.
 
 ## The core rule: only `/workspace` persists
 
-The container's home directory (`/root/...`) lives on the **ephemeral** container filesystem. Any `coding-container create`/`deploy` that runs a different image version forces a new pod and a fresh container filesystem — in custom mode every build produces a new tag, and in global mode the pod is recreated whenever the team publishes a new global version (`system create`) or you pin another one. Anything you copy into `~` over SSH — for example `~/.config/opencode/` — is wiped on the next rebuild.
+The container's home directory (`/root/...`) lives on the **ephemeral** container filesystem. Any `coding-container create`/`deploy` that runs a different image version forces a new pod and a fresh container filesystem. In custom mode every build produces a new tag, and in global mode the pod is recreated whenever the team publishes a new global version (`system create`) or you pin another one. Anything you copy into `~` over SSH (for example `~/.config/opencode/`) is wiped on the next rebuild.
 
 The only thing that survives across rebuilds is `/workspace`, because it is the NFS (NAS) mount (per-project subfolder). So:
 
@@ -37,10 +37,10 @@ The remaining question is simply how an application *finds* a file that it expec
 
 ### Why this over the alternatives
 
-- **Persists per-project** — it sits on the NAS subfolder, so it survives rebuilds and stays isolated per project.
-- **Version-controllable** — `/workspace` is usually your project git checkout, so you can commit the dotfiles and keep them synced like any other source.
-- **No image rebuild, no extra k8s objects** — unlike baking a `COPY` into the shared `Dockerfile` (one image is shared by *all* projects, so it cannot hold per-project config), and unlike a ConfigMap (1 MiB size limit, awkward for many or binary files).
-- **Works for any app** — symlinks satisfy applications that do *not* honor environment overrides such as `XDG_CONFIG_HOME` or `OPENCODE_CONFIG`.
+- **Persists per-project.** It sits on the NAS subfolder, so it survives rebuilds and stays isolated per project.
+- **Version-controllable.** `/workspace` is usually your project git checkout, so you can commit the dotfiles and keep them synced like any other source.
+- **No image rebuild, no extra k8s objects.** Unlike baking a `COPY` into the shared `Dockerfile` (one image is shared by *all* projects, so it cannot hold per-project config), and unlike a ConfigMap (1 MiB size limit, awkward for many or binary files).
+- **Works for any app.** Symlinks satisfy applications that do *not* honor environment overrides such as `XDG_CONFIG_HOME` or `OPENCODE_CONFIG`.
 
 ## Implementation note (proposed)
 

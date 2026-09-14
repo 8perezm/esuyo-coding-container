@@ -67,6 +67,6 @@ Useful flags:
 
 ## See also
 
-- [Configuration](./configuration.md) — config layers and per-project overrides
-- [Global image](./global-image.md) — image modes, publishing, and pruning in detail
-- [SSH and VS Code](./ssh-and-vscode.md) — key rotation and editor setup
+- [Configuration](./configuration.md): config layers and per-project overrides
+- [Global image](./global-image.md): image modes, publishing, and pruning in detail
+- [SSH and VS Code](./ssh-and-vscode.md): key rotation and editor setup

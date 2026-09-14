@@ -1,7 +1,7 @@
 {
   "name": "@esuyo/coding-container",
   "version": "1.0.1",
-  "description": "CLI to build, publish and deploy SSH-accessible coding containers on k3s",
+  "description": "CLI to build, publish and deploy SSH-accessible coding containers on Kubernetes",
   "type": "module",
   "bin": {
     "coding-container": "src/index.js"

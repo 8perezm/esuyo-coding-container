@@ -95,11 +95,11 @@ project: ${project}
 k8s:
   nodePort: ${nodePort}
 
-# Expose container ports to the browser through Traefik (one Ingress host
-# per port). DNS for the hosts must resolve to your Traefik LoadBalancer.
+# Expose container ports to the browser through Traefik (one Ingress rule
+# per host). DNS for the hosts must resolve to your Traefik LoadBalancer.
 # web:
 #   ports:
-#     - { port: 3000, host: my-web.example.com }
+#     - { port: 3000, hosts: [my-web.example.com, www.example.com] }
 `
   );
   return { configPath, created: true, project, nodePort };

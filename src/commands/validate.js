@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { imageRef } from "../config.js";
-import { fullManifest, secretEnvEntries } from "../utils/manifest.js";
+import { fullManifest, secretEnvEntries, webPorts } from "../utils/manifest.js";
 import { readPublicKey } from "../utils/keys.js";
 import { getSystemConfig, SYSTEM_CM_NAME } from "../utils/system-config.js";
 
@@ -77,8 +77,10 @@ export function validate(cfg, { manifest = false } = {}) {
   if (sidecars.length) {
     console.log(`  sidecars:  ${sidecars.map((s) => s.name).join(", ")}`);
   }
-  for (const p of cfg.web?.ports || []) {
-    console.log(`  web:       container port ${p.port} -> http://${p.host}/`);
+  for (const p of webPorts(cfg)) {
+    for (const host of p.hosts) {
+      console.log(`  web:       container port ${p.port} -> http://${host}/`);
+    }
   }
   for (const v of cfg.nfs.volumes || []) {
     console.log(`  volume:    ${v.subPath} -> ${v.mountPath}${v.readOnly ? " (read-only)" : ""}`);

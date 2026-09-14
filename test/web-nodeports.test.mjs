@@ -95,8 +95,47 @@ test("config: valid web nodePort loads", () => {
   const cfg = loadWeb("    - { port: 3000, host: x.example.com, nodePort: 30080 }");
   assert.equal(cfg.web.ports[0].nodePort, 30080);
   assert.deepEqual(webPorts(cfg), [
-    { name: "web-3000", port: 3000, host: "x.example.com", nodePort: 30080 },
+    { name: "web-3000", port: 3000, hosts: ["x.example.com"], nodePort: 30080 },
   ]);
+});
+
+test("config: hosts list points several domains at one port", () => {
+  const cfg = loadWeb("    - { port: 3000, hosts: [a.example.com, b.example.com] }");
+  assert.deepEqual(webPorts(cfg), [
+    { name: "web-3000", port: 3000, hosts: ["a.example.com", "b.example.com"] },
+  ]);
+});
+
+test("config: host and hosts may be combined (host first)", () => {
+  const cfg = loadWeb("    - { port: 3000, host: a.example.com, hosts: [b.example.com] }");
+  assert.deepEqual(webPorts(cfg), [
+    { name: "web-3000", port: 3000, hosts: ["a.example.com", "b.example.com"] },
+  ]);
+});
+
+test("ingress: one rule per host, all to the same backend port", () => {
+  const cfg = manifestCfg([{ port: 3000, host: "a.example.com", hosts: ["b.example.com"] }]);
+  const rules = ingressManifest(cfg).spec.rules;
+  assert.deepEqual(
+    rules.map((r) => r.host),
+    ["a.example.com", "b.example.com"]
+  );
+  for (const rule of rules) {
+    assert.equal(rule.http.paths[0].backend.service.port.number, 3000);
+  }
+});
+
+test("config: duplicate host across entries is rejected", () => {
+  assert.throws(
+    () =>
+      loadWeb(
+        [
+          "    - { port: 3000, hosts: [a.example.com, b.example.com] }",
+          "    - { port: 8080, host: b.example.com }",
+        ].join("\n")
+      ),
+    /share the host "b\.example\.com"/
+  );
 });
 
 const INVALID = [
@@ -133,6 +172,16 @@ const INVALID = [
     "    - { port: 3000, host: x.example.com, nodePort: 30432 }",
     /collides with another web\.ports or sidecar port nodePort/,
     `k8s:\n  sidecars:\n    - name: postgres\n      image: postgres:16\n      ports:\n        - { containerPort: 5432, name: postgres, nodePort: 30432 }\n`,
+  ],
+  [
+    "hosts not a list",
+    "    - { port: 3000, hosts: x.example.com }",
+    /'hosts' must be a list/,
+  ],
+  [
+    "neither host nor hosts",
+    "    - { port: 3000 }",
+    /needs a 'host' or a non-empty 'hosts' list/,
   ],
 ];
 

@@ -10,7 +10,7 @@ esuyo-k8s-coding-container/
 ├── Dockerfile              # Packaged starting point: `setup` copies it to ~/.config/coding-container/; the build uses that personal copy
 ├── .gitignore              # Ignores .opencode/, node_modules/, keys/, *.pem
 ├── docs/                   # Developer documentation
-├── test/                   # node:test suite (run with `npm test`); hermetic — no cluster/registry/network needed
+├── test/                   # node:test suite (run with `npm test`); hermetic, no cluster/registry/network needed
 └── src/
     ├── index.js            # CLI entrypoint: commander program, command wiring, global flags
     ├── config.js           # Config file resolution (cwd -> repo), layered merge (defaults -> global -> project -> CLI), path resolution, validation
@@ -41,7 +41,7 @@ esuyo-k8s-coding-container/
 
 - **Config is layered.** The project `config.yaml` (what a repo commits) overrides the global config at `~/.config/coding-container/config.yaml`, which overrides built-in defaults; CLI flags win over all of it. Every relative path in a layer (`dockerfile`, `context`, `keyDir`) resolves against that layer's own directory, so the CLI works from any working directory.
 - **SSH material lives globally, not in the repo.** `~/.config/coding-container/keys/` holds the shared ed25519 key pair plus per-project `<project>-known_hosts` files; the first `deploy`/`create`/`ssh`/`key` invocation generates the pair. `coding-container key --force` rotates it (all deployed projects then need a `deploy`). A project can opt into its own key with `ssh.keyDir` in its config.
-- **The build's Dockerfile lives globally too.** `setup` copies the repo's `Dockerfile` into `~/.config/coding-container/` (plus a `.dockerignore`), and the global config points there — so the build context is the global folder, never the repo, and the private keys stay out of it.
+- **The build's Dockerfile lives globally too.** `setup` copies the repo's `Dockerfile` into `~/.config/coding-container/` (plus a `.dockerignore`), and the global config points there, so the build context is the global folder, never the repo, and the private keys stay out of it.
 - **`src/utils/exec.js` is the only place that spawns processes.** Commands and utilities stay thin on top of `exec`/`run`/`runWithInput`/`start`.
 - **`src/utils/manifest.js` owns all Kubernetes object shapes.** If you add a k8s resource (e.g. a PodDisruptionBudget), add a renderer there and include it in `fullManifest()`.
 - **Tests run with `npm test` (Node's built-in `node:test`, no extra dependencies).** `test/gc.test.js`, `test/semver.test.js` and `test/system-config.test.js` are pure unit tests (retention logic `planGc`/`imageTag`, semver sorting, ConfigMap parsing + the float). `test/registry-api.test.mjs`, `test/cli-gc.test.mjs` and `test/cli-system.test.mjs` are hermetic integration tests: they start an in-process mock Docker Registry and stub `kubectl` (a `.js` script via `KUBECTL_BIN`) and `docker` (a `.js` script via `DOCKER_BIN`), so no cluster, real registry, real docker build or network is needed.

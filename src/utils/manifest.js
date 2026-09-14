@@ -78,17 +78,25 @@ export function secretManifest(cfg, { redact = false } = {}) {
 }
 
 /**
- * Normalized web.ports entries: {name, port, host, nodePort?}. Names default
- * to web-<port>; nodePort (30000-32767) is an optional service-level knob
- * that also exposes the port on every cluster node.
+ * Normalized web.ports entries: {name, port, hosts, nodePort?}. 'hosts' is
+ * the entry's singular 'host' (if any) plus its 'hosts' list, deduplicated;
+ * the Ingress renders one rule per host. Names default to web-<port>;
+ * nodePort (30000-32767) is an optional service-level knob that also exposes
+ * the port on every cluster node.
  */
 export function webPorts(cfg) {
-  return (cfg.web?.ports || []).map((entry) => ({
-    name: entry.name || `web-${entry.port}`,
-    port: entry.port,
-    host: entry.host,
-    ...(entry.nodePort !== undefined ? { nodePort: entry.nodePort } : {}),
-  }));
+  return (cfg.web?.ports || []).map((entry) => {
+    const hosts = [
+      ...(entry.host !== undefined ? [entry.host] : []),
+      ...(Array.isArray(entry.hosts) ? entry.hosts : []),
+    ];
+    return {
+      name: entry.name || `web-${entry.port}`,
+      port: entry.port,
+      hosts: [...new Set(hosts)],
+      ...(entry.nodePort !== undefined ? { nodePort: entry.nodePort } : {}),
+    };
+  });
 }
 
 /**
@@ -273,9 +281,9 @@ export function serviceManifest(cfg) {
 }
 
 /**
- * Ingress with one rule per web port: the entry's host routes to that
- * container port on the project's service. Only rendered when web.ports is
- * non-empty.
+ * Ingress with one rule per web host: every host in a web port entry routes
+ * to that entry's container port on the project's service. Only rendered when
+ * web.ports is non-empty.
  */
 export function ingressManifest(cfg) {
   return {
@@ -288,18 +296,20 @@ export function ingressManifest(cfg) {
     },
     spec: {
       ingressClassName: cfg.ingress.className,
-      rules: webPorts(cfg).map((p) => ({
-        host: p.host,
-        http: {
-          paths: [
-            {
-              path: "/",
-              pathType: "Prefix",
-              backend: { service: { name: cfg.project, port: { number: p.port } } },
-            },
-          ],
-        },
-      })),
+      rules: webPorts(cfg).flatMap((p) =>
+        p.hosts.map((host) => ({
+          host,
+          http: {
+            paths: [
+              {
+                path: "/",
+                pathType: "Prefix",
+                backend: { service: { name: cfg.project, port: { number: p.port } } },
+              },
+            ],
+          },
+        }))
+      ),
     },
   };
 }

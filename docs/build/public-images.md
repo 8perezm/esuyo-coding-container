@@ -24,14 +24,14 @@ Non-goals:
 * No replacement of root `Dockerfile` or the private-registry flow.
 * No `devcontainer.json` / devcontainer-features compatibility.
 * No change to NFS/storage model (prebuilt images do not remove the NAS
-  requirement — see §6).
+  requirement, see §6).
 
 ## 2. Design decisions
 
 * **Additive only.** `setup` copies only root `Dockerfile`; `build/push/deploy`
   never look at `public-images/`. Existing hermetic tests (`npm test`) ignore it.
 * **One subfolder per variant.** e.g. `public-images/base-ubuntu/`,
-  `public-images/devcontainer-base/` — each self-contained with its own
+  `public-images/devcontainer-base/`, each self-contained with its own
   Dockerfile + README snippet. If Microsoft renames a base tag, only that
   variant breaks.
 * **Reuse the SSH contract from the main image.** Same expectations so `deploy`,
@@ -41,9 +41,9 @@ Non-goals:
   Decide root vs `vscode` user per variant (see §6); default recommendation is
   stay `root` for v1 to keep manifest/SSH identical.
 * **Full vs slim is really about Playwright.** Size guidance (from current image):
-  opencode / pi / herdr / turbo are small (tens of MB each) — include by default
+  opencode / pi / herdr / turbo are small (tens of MB each), include by default
   for parity. Node + build-essential + headers + clients are medium (hundreds of
-  MB) — keep for dev parity. Playwright + Chromium with deps is huge
+  MB), keep for dev parity. Playwright + Chromium with deps is huge
   (600MB–1GB+) and dominates build time, pull time, and node disk. So:
   `full` = parity including Playwright, `slim` = identical minus Playwright
   (equivalent to `INSTALL_PLAYWRIGHT=false` today). Both share most layers so
@@ -56,10 +56,10 @@ Non-goals:
   discoverability only. Tags follow the repo's existing `vX.Y.Z` semver so
   `system list / rollback / gc` mental model still applies if a team floats on
   the public image.
-* **Multi-arch from day one.** Build `amd64+arm64`; k3s clusters are often mixed
+* **Multi-arch from day one.** Build `amd64+arm64`; Kubernetes clusters are often mixed
   or Pi-based, devcontainer bases already are.
 
-## 3. Changes, file by file (when implemented — not now)
+## 3. Changes, file by file (when implemented, not now)
 
 * `public-images/README.md` (new): purpose, variant matrix, pull examples,
   disclaimer (public, versioned separately, trust the publisher), link back to
@@ -72,7 +72,7 @@ Non-goals:
   out of context, mirroring the root packaging gotcha.
 * `.github/workflows/publish-public-images.yaml` (new): matrix over variants ×
   (full/slim), buildx multi-arch, push to `ghcr.io/<org>/coding-<variant>:vX.Y.Z`
-  (+ `:latest` only if deliberately wanted — note current CLI has no `latest`
+  (+ `:latest` only if deliberately wanted; note current CLI has no `latest`
   fallback, explicit tag required). Sign with cosign / provenance.
 * `README.md` (edit, small): one short "No registry? Use prebuilt community
   images → see `public-images/`" section next to Installation/Prerequisites.
@@ -89,19 +89,19 @@ Non-goals:
   lands in `/workspace`, `node --version`, `opencode --version`, `pi --version`,
   `herdr --version` present; slim variant asserts `playwright` absent.
 * Render check without cluster: `coding-container validate --manifest` with a
-  project config pointing `image.registry` at the public repo — manifest image
+  project config pointing `image.registry` at the public repo. Manifest image
   ref resolves, no pull-secret failure blocks deploy (warning only).
-* End-to-end (needs k3s, once): `create` + `ssh` + `deploy` against public tag;
+* End-to-end (needs Kubernetes, once): `create` + `ssh` + `deploy` against public tag;
   confirm `ImagePullBackOff` does not occur with no pull secret configured.
 * Registry API sanity: `system list` / `gc --dry-run` equivalents against GHCR
-  (and Docker Hub if mirrored) — V2 `tags/list` + auth flow both work; Docker
+  (and Docker Hub if mirrored). V2 `tags/list` + auth flow both work; Docker
   Hub `library/` namespace quirks checked before promising Hub support.
 
 ## 5. Rollout / compatibility
 
 * Backward compatible: default flow untouched; public images are purely an
   alternative `image.registry/name/tag` value.
-* Removal risk: none — deleting `public-images/` changes nothing about the CLI.
+* Removal risk: none. Deleting `public-images/` changes nothing about the CLI.
 * Custom-mode users still need their own registry for their own builds; document
   that `public-images` covers the shared/global use case only.
 * Disk/GC: public repos accumulate tags like private ones; document that global
@@ -123,5 +123,5 @@ Non-goals:
    prerequisites but pods still need `nfs.server`/`nfs.basePath`. Is an
    `emptyDir`/`hostPath`/PVC fallback in scope for no-NAS users, or explicitly
    out of scope for this side project?
-6. **Folder name:** `public-images/` vs `community-images/` vs `prebuilt/` —
+6. **Folder name:** `public-images/` vs `community-images/` vs `prebuilt/`,
    pick one before writing the README pointer.

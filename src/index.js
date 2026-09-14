@@ -33,7 +33,7 @@ const { version } = require("../package.json");
 
 program
   .name("coding-container")
-  .description("Build, publish and deploy SSH-accessible coding containers on k3s")
+  .description("Build, publish and deploy SSH-accessible coding containers on Kubernetes")
   .version(version)
   // Positional options: flags before the subcommand are global, flags after
   // belong to the subcommand. Required so `system create --tag vX.Y.Z` is
@@ -119,7 +119,7 @@ program
 
 program
   .command("deploy")
-  .description("deploy the image to the k3s cluster")
+  .description("deploy the image to the Kubernetes cluster")
   .option("--no-wait", "do not wait for the rollout to finish")
   .action(async (opts) => {
     const cfg = cfgFrom();

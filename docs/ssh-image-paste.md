@@ -16,7 +16,7 @@ Prerequisite for anything below: use a vision-capable model (image input enabled
 2. Copy it into `/workspace` (`scp`, or drag-drop into the Explorer when connected via Remote-SSH).
 3. Reference it in `opencode` with `@/workspace/image.png`.
 
-When connected with Zed Remote or any Remote-SSH client, step 2 is just saving into the opened `/workspace` - it is already remote.
+When connected with Zed Remote or any Remote-SSH client, step 2 is just saving into the opened `/workspace`, which is already remote.
 
 ## Windows Terminal
 
@@ -24,8 +24,8 @@ Use a clipboard bridge. It watches local `Ctrl+V`, uploads the PNG over SSH with
 
 Options:
 
-* `Empty-Jing/opencode-ssh-image-paste` - built for Windows Terminal + `opencode` + SSH, keeps `Ctrl+V` for text.
-* `cc-clip --opencode`, `clipssh`, `cssh` - generic upload-and-paste-path workflows (Windows support is experimental for some).
+* `Empty-Jing/opencode-ssh-image-paste`: built for Windows Terminal + `opencode` + SSH, keeps `Ctrl+V` for text.
+* `cc-clip --opencode`, `clipssh`, `cssh`: generic upload-and-paste-path workflows (Windows support is experimental for some).
 
 The `coding-<project>` alias in `~/.ssh/config` (written by `deploy`) already carries `IdentityFile` and `StrictHostKeyChecking no`, so it satisfies the usual bridge requirement of non-interactive key auth. Verify with:
 
@@ -49,5 +49,5 @@ So in Zed / VS Code Remote: save the screenshot into `/workspace` (in VS Code, d
 
 ## See also
 
-* [SSH and VS Code](./ssh-and-vscode.md) - `coding-<project>` alias, key rotation.
-* [Troubleshooting](./troubleshooting.md) - connection fixes.
+* [SSH and VS Code](./ssh-and-vscode.md): `coding-<project>` alias, key rotation.
+* [Troubleshooting](./troubleshooting.md): connection fixes.

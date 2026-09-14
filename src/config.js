@@ -101,19 +101,20 @@ export const DEFAULTS = {
   },
   web: {
     // Container ports to expose to the browser (dev servers, etc.). Each
-    // entry becomes a Traefik Ingress rule: its host routes to that container
-    // port on the project's service. DNS resolution of the hosts is up to you.
+    // entry becomes one Traefik Ingress rule per host: the 'hosts' list (or
+    // the singular 'host') routes to that container port on the project's
+    // service. DNS resolution of the hosts is up to you.
     // An optional 'nodePort' (30000-32767, unique across ssh, web.ports, and
     // sidecars) additionally exposes the port on every cluster node, for
     // clients that can't use the Ingress hosts.
     //   web:
     //     ports:
-    //       - { port: 3000, host: my-web.example.com, nodePort: 30080 }
+    //       - { port: 3000, hosts: [my-web.example.com, www.example.com], nodePort: 30080 }
     //       - { port: 8080, host: my-api.example.com, name: api }
     ports: [],
   },
   ingress: {
-    // Ingress class that routes the web.ports rules (k3s ships Traefik).
+    // Ingress class that routes the web.ports rules (Traefik, bundled with many Kubernetes distributions).
     className: "traefik",
   },
   container: {
@@ -508,7 +509,7 @@ function validate(cfg) {
   }
   if (cfg.web?.ports !== undefined) {
     if (!Array.isArray(cfg.web.ports)) {
-      throw new Error("config: web.ports must be a list of {port, host} entries");
+      throw new Error("config: web.ports must be a list of {port, host|hosts} entries");
     }
     const seenPorts = new Set();
     const seenHosts = new Set();
@@ -516,25 +517,42 @@ function validate(cfg) {
       const port = entry && entry.port;
       if (!entry || typeof entry !== "object" || !Number.isInteger(port) || port < 1 || port > 65535) {
         throw new Error(
-          `config: web.ports entry must be an object with a 'port' (1-65535) and a 'host': ${JSON.stringify(entry)}`
+          `config: web.ports entry must be an object with a 'port' (1-65535) and a 'host' or 'hosts': ${JSON.stringify(entry)}`
         );
       }
       if (seenPorts.has(port)) {
         throw new Error(`config: web.ports lists port ${port} more than once`);
       }
       seenPorts.add(port);
-      if (
-        typeof entry.host !== "string" ||
-        !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(entry.host)
-      ) {
+      const hosts = [];
+      if (entry.host !== undefined) hosts.push(entry.host);
+      if (entry.hosts !== undefined) {
+        if (!Array.isArray(entry.hosts)) {
+          throw new Error(
+            `config: web.ports entry for port ${port} 'hosts' must be a list: ${JSON.stringify(entry.hosts)}`
+          );
+        }
+        hosts.push(...entry.hosts);
+      }
+      if (hosts.length === 0) {
         throw new Error(
-          `config: web.ports entry for port ${port} has an invalid host (lowercase a-z/0-9/-/.): ${JSON.stringify(entry.host)}`
+          `config: web.ports entry for port ${port} needs a 'host' or a non-empty 'hosts' list`
         );
       }
-      if (seenHosts.has(entry.host)) {
-        throw new Error(`config: web.ports entries share the host "${entry.host}"`);
+      for (const host of hosts) {
+        if (
+          typeof host !== "string" ||
+          !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(host)
+        ) {
+          throw new Error(
+            `config: web.ports entry for port ${port} has an invalid host (lowercase a-z/0-9/-/.): ${JSON.stringify(host)}`
+          );
+        }
+        if (seenHosts.has(host)) {
+          throw new Error(`config: web.ports entries share the host "${host}"`);
+        }
+        seenHosts.add(host);
       }
-      seenHosts.add(entry.host);
       if (
         entry.name !== undefined &&
         (!/^[a-z]([-a-z0-9]*[a-z0-9])?$/.test(entry.name) || entry.name.length > 15)
