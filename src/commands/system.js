@@ -1,6 +1,6 @@
 import { exec } from "../utils/exec.js";
 import { listTags } from "../utils/registry-api.js";
-import { isSemver, compareSemver, semverSortAsc } from "../utils/semver.js";
+import { isSemver, compareSemver, semverSortAsc, bumpPatch } from "../utils/semver.js";
 import {
   getSystemConfig,
   patchSystemConfig,
@@ -126,9 +126,13 @@ export async function systemList(cfg) {
  */
 export async function systemCreate(cfg, { tag } = {}) {
   requireGlobalMode(cfg);
-  requireSemverTag(tag);
   const ns = cfg.k8s.namespace;
   const sys = getSystemConfig(ns);
+  if (!tag) {
+    tag = bumpPatch(sys.maxEver);
+    console.log(`No --tag given, auto-bumped to ${tag} (patch +1 over maxEver ${sys.maxEver})`);
+  }
+  requireSemverTag(tag);
   if (compareSemver(tag, sys.maxEver) <= 0) {
     throw new Error(
       `tag ${tag} is not greater than maxEver ${sys.maxEver} — global tags are immutable and ` +

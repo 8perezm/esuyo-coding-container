@@ -264,10 +264,12 @@ system
   .description(
     "build + push a new global version and repoint current (the only writer of the global image)"
   )
-  .requiredOption("--tag <tag>", "new version (semver vX.Y.Z, must not exist and must be > maxEver)")
+  .option("--tag <tag>", "new version (semver vX.Y.Z, must not exist and must be > maxEver; default: maxEver patch +1)")
   .action(async (opts) => {
     const cfg = cfgFrom();
-    await systemCreate(cfg, { tag: opts.tag });
+    // Global --tag (before `system`) also works: `coding-container --tag vX.Y.Z system create`.
+    const tag = opts.tag ?? program.opts().tag;
+    await systemCreate(cfg, { tag });
   });
 
 system

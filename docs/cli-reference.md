@@ -55,7 +55,7 @@ Useful flags:
     --dry-run          list what would be deleted without deleting anything
 
 # system create
-    --tag <tag>        the new version to publish (semver, > maxEver, not yet in the registry)
+    --tag <tag>        the new version to publish (semver, > maxEver, not yet in the registry; default: maxEver patch +1)
 
 # system init
     --tag <tag>        the initial version (semver)

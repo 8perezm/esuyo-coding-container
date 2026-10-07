@@ -20,6 +20,17 @@ export function compareSemver(a, b) {
 }
 
 /**
+ * Patch-bump a semver tag (vX.Y.Z -> vX.Y.Z+1). Assumes the input is semver.
+ */
+export function bumpPatch(tag) {
+  const m = typeof tag === "string" && tag.match(SEMVER_RE);
+  if (!m) {
+    throw new Error(`cannot bump patch: not a semver tag (vX.Y.Z), got: ${tag}`);
+  }
+  return `v${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
+}
+
+/**
  * The semver tags of a list, sorted ascending (oldest first). Non-semver
  * tags (e.g. legacy timestamp tags) are excluded.
  */
