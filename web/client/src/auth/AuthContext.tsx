@@ -1,0 +1,74 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ApiError, api } from '../lib/api';
+
+export interface User {
+  email: string;
+  displayName?: string;
+}
+
+interface AuthState {
+  user: User | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  setDisplayUser: (user: User | null) => void;
+}
+
+const AuthContext = createContext<AuthState | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const me = await api.get<User>('/api/me');
+      setUser(me);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setUser(null);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load session');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const me = await api.post<User>('/api/login', { email, password });
+    setUser(me);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await api.post('/api/logout');
+    setUser(null);
+  }, []);
+
+  const setDisplayUser = useCallback((next: User | null) => {
+    setUser(next);
+  }, []);
+
+  const value = useMemo<AuthState>(
+    () => ({ user, loading, error, refresh, login, logout, setDisplayUser }),
+    [user, loading, error, refresh, login, logout, setDisplayUser],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthState {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');
+  return ctx;
+}

@@ -9,7 +9,12 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js",
+    "dev": "node web/dev.js",
+    "dev:cli": "node src/index.js",
+    "dev:server": "node web/server/server.js",
+    "dev:client": "npm --prefix web/client run dev",
+    "build:gui": "npm --prefix web/client run build",
+    "start:gui": "node web/server/server.js",
     "test": "node --test"
   },
   "engines": {
