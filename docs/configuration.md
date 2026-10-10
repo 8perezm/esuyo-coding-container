@@ -40,6 +40,7 @@ k8s:
   replicas: 1
   serviceType: NodePort        # or LoadBalancer
   nodePort: 30022
+  # nodeName: worker-02        # optional: pin the pod to one named node (`kubectl get nodes`)
   imagePullSecret: ""          # leave empty: the CLI resolves one automatically
   resources:
     requests: { cpu: 100m, memory: 128Mi }
@@ -87,6 +88,16 @@ k8s:
 ```
 
 `-c <file>` still works when you don't want to `cd` (e.g. `coding-container -c C:\work\api\config.yaml ssh`). Each project gets its own pod, service, and NAS subfolder (`/workspaces/my-api`). Global-mode projects share the same image and (by default) the same key pair; custom-mode projects build their own image (`registry/coding-<project>` unless `image.name` is set), and `ssh.keyDir` opts a project into its own key pair.
+
+**Pinning the pod to a node.** By default the scheduler picks a node. To force placement on one named node (e.g. the one with the NAS mount or a GPU), set `k8s.nodeName` (`kubectl get nodes` for names):
+
+```yaml
+project: my-api
+k8s:
+  nodeName: worker-02
+```
+
+It renders as `nodeName` on the pod spec. If that node is down or the name is wrong, the pod stays `Pending` until the node is available — clear the key to let the scheduler pick again. Applies on the next `deploy` (or `create`).
 
 **Pinning the NAS folder.** By default the subfolder is the project name. To mount a specific folder instead (e.g. to reuse data from an earlier project or a folder you already manage on the NAS), set `nfs.subPath`, which must be a relative folder name under `nfs.basePath`:
 

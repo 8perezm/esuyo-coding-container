@@ -227,6 +227,9 @@ export function deploymentManifest(cfg, pullSecret = null) {
         },
         spec: {
           ...(pullSecret ? { imagePullSecrets: [{ name: pullSecret }] } : {}),
+          // Pin the pod to one named cluster node when k8s.nodeName is set.
+          // Empty/unset -> the scheduler picks a node as before.
+          ...(cfg.k8s?.nodeName ? { nodeName: cfg.k8s.nodeName } : {}),
           containers: [container, ...sidecarContainers(cfg)],
           volumes: [
             {

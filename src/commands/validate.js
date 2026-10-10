@@ -68,7 +68,10 @@ export function validate(cfg, { manifest = false } = {}) {
         : `${cfg.image.registry}/${cfg.image.name}:<no tag — run 'coding-container system init' or set image.tag>`
     }`
   );
-  console.log(`  cluster:   namespace ${cfg.k8s.namespace}, ${cfg.k8s.serviceType} port ${cfg.k8s.nodePort}`);
+  console.log(
+    `  cluster:   namespace ${cfg.k8s.namespace}, ${cfg.k8s.serviceType} port ${cfg.k8s.nodePort}` +
+      (cfg.k8s.nodeName ? `, node ${cfg.k8s.nodeName}` : "")
+  );
   const secretKeys = secretEnvEntries(cfg).map(([name]) => name);
   if (secretKeys.length) {
     console.log(`  secrets:   ${secretKeys.join(", ")} (via Secret ${cfg.project}-env, values never shown)`);

@@ -50,6 +50,12 @@ export const DEFAULTS = {
     replicas: 1,
     serviceType: "NodePort",
     nodePort: 30022,
+    // Exact cluster node the pod is pinned to (k8s podSpec.nodeName).
+    // Unset (empty) -> the scheduler picks a node. Set it to force placement,
+    // e.g. a node with the NAS mount or a GPU:
+    //   k8s:
+    //     nodeName: worker-02
+    nodeName: "",
     imagePullSecret: "",
     resources: {
       requests: { cpu: "100m", memory: "128Mi" },
@@ -368,6 +374,17 @@ function validate(cfg) {
   const st = cfg.k8s.serviceType;
   if (st !== "NodePort" && st !== "LoadBalancer") {
     throw new Error("config: k8s.serviceType must be NodePort or LoadBalancer");
+  }
+  if (cfg.k8s.nodeName !== undefined && cfg.k8s.nodeName !== "") {
+    if (
+      typeof cfg.k8s.nodeName !== "string" ||
+      cfg.k8s.nodeName.length > 253 ||
+      !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(cfg.k8s.nodeName)
+    ) {
+      throw new Error(
+        `config: k8s.nodeName must be a valid node name (lowercase a-z/0-9/-/. , max 253 chars): ${JSON.stringify(cfg.k8s.nodeName)}`
+      );
+    }
   }
   for (const field of ["env", "secretEnv"]) {
     const map = cfg.k8s[field];

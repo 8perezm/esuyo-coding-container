@@ -8,6 +8,9 @@ project: my-project
 
 k8s:
   nodePort: 30022
+  # Pin the pod to one named cluster node (kubectl get nodes). Empty/unset ->
+  # the scheduler picks a node.
+  # nodeName: worker-02
 
 # Expose container ports to the browser through Traefik: one Ingress rule per
 # host ('hosts' list, or a single 'host'), each routing to that port on this
