@@ -9,6 +9,7 @@ interface PageHeaderProps {
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
     <div
+      data-ref="page-header"
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -18,11 +19,11 @@ export function PageHeader({ title, description, actions }: PageHeaderProps) {
         flexWrap: 'wrap',
       }}
     >
-      <div>
-        <h1 style={{ fontSize: 24, marginBottom: description ? 6 : 0 }}>{title}</h1>
-        {description && <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 14 }}>{description}</p>}
+      <div data-ref="page-header-text">
+        <h1 style={{ fontSize: 'var(--font-size-4xl)', marginBottom: description ? 6 : 0 }} data-ref="page-header-title">{title}</h1>
+        {description && <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }} data-ref="page-header-description">{description}</p>}
       </div>
-      {actions && <div style={{ display: 'flex', gap: 8 }}>{actions}</div>}
+      {actions && <div style={{ display: 'flex', gap: 8 }} data-ref="page-header-actions">{actions}</div>}
     </div>
   );
 }

@@ -7,9 +7,10 @@ interface PlaceholderProps {
 
 export function PlaceholderPage({ title, description }: PlaceholderProps) {
   return (
-    <div>
+    <div data-ref="page-placeholder">
       <PageHeader title={title} description={description} />
       <div
+        data-ref="page-placeholder-box"
         style={{
           border: '1px dashed var(--border-color)',
           borderRadius: 8,
@@ -17,7 +18,7 @@ export function PlaceholderPage({ title, description }: PlaceholderProps) {
           padding: 32,
           textAlign: 'center',
           color: 'var(--text-muted)',
-          fontSize: 14,
+          fontSize: 'var(--font-size-md)',
         }}
       >
         Full {title.toLowerCase()} management arrives in a later milestone — this route shell is ready for it.
@@ -28,12 +29,9 @@ export function PlaceholderPage({ title, description }: PlaceholderProps) {
 
 export const PLACEHOLDERS: Record<string, { title: string; description: string }> = {
   '/projects': { title: 'Projects', description: 'Per-project containers, workspaces, and lifecycle actions.' },
-  '/deploy': { title: 'Deploy', description: 'Build, publish, and roll out container images.' },
   '/images': { title: 'Images', description: 'Shared team image versions, publishing, and rollback.' },
   '/system': { title: 'System', description: 'Cluster health, versions, and global configuration.' },
   '/ssh-keys': { title: 'SSH & Keys', description: 'SSH access, key rotation, and VS Code Remote-SSH setup.' },
-  '/validate': { title: 'Validate', description: 'Configuration checks before create and deploy.' },
-  '/gc': { title: 'GC', description: 'Garbage-collect unused images and stale resources.' },
   '/setup': { title: 'Setup', description: 'One-time environment setup: config, keys, registry.' },
   '/jobs': { title: 'Jobs', description: 'Background tasks and their status history.' },
 };

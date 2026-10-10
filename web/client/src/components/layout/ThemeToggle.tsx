@@ -14,6 +14,7 @@ export function ThemeToggle({ theme, onToggle }: ThemeToggleProps) {
       className="icon-button"
       aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
       aria-pressed={isDark}
+      data-ref="theme-toggle"
       onClick={onToggle}
     >
       {isDark ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}

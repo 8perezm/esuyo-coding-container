@@ -111,30 +111,30 @@ export function JobsPage() {
   const running = detail?.status === 'running';
 
   return (
-    <div>
+    <div data-ref="page-jobs">
       <PageHeader title="Jobs" description="Background tasks and their status history." />
 
       {listError ? (
-        <Card>
-          <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+        <Card data-ref="page-jobs-list-error-card">
+          <p data-ref="page-jobs-list-error" role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
             Could not load jobs: {listError}
           </p>
         </Card>
       ) : jobs === null ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} aria-label="Loading jobs">
-          <div className="skeleton" style={{ height: 48 }} />
-          <div className="skeleton" style={{ height: 48 }} />
-          <div className="skeleton" style={{ height: 48 }} />
+        <div data-ref="page-jobs-loading" style={{ display: 'flex', flexDirection: 'column', gap: 8 }} aria-label="Loading jobs">
+          <div data-ref="page-jobs-loading-skeleton-1" className="skeleton" style={{ height: 48 }} />
+          <div data-ref="page-jobs-loading-skeleton-2" className="skeleton" style={{ height: 48 }} />
+          <div data-ref="page-jobs-loading-skeleton-3" className="skeleton" style={{ height: 48 }} />
           <Spinner label="Loading jobs…" />
         </div>
       ) : jobs.length === 0 ? (
         <EmptyState
           title="No jobs yet"
-          description="Operations like create, deploy, and system create run here so long CLI output never blocks the UI."
+          description="Operations like create, deploy, and system create run here so long output never blocks the UI."
         />
       ) : (
-        <TableContainer>
-          <Table>
+        <TableContainer data-ref="page-jobs-table-container">
+          <Table data-ref="page-jobs-table">
             <THead>
               <TR>
                 <TH>ID</TH>
@@ -150,6 +150,7 @@ export function JobsPage() {
                 <TR key={job.id} style={job.id === selectedId ? { backgroundColor: 'var(--bg-card)' } : undefined}>
                   <TD>
                     <button
+                      data-ref="page-jobs-select-button"
                       type="button"
                       onClick={() => setSelectedId(job.id)}
                       title={job.id}
@@ -161,7 +162,7 @@ export function JobsPage() {
                         cursor: 'pointer',
                         minHeight: 44,
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                        fontSize: 13,
+                        fontSize: 'var(--font-size-sm)',
                         color: 'var(--accent, #2563eb)',
                         textDecoration: 'underline',
                       }}
@@ -170,7 +171,7 @@ export function JobsPage() {
                     </button>
                   </TD>
                   <TD>{job.op}</TD>
-                  <TD style={{ fontSize: 13 }}>{job.projectId ? shortId(job.projectId) : '—'}</TD>
+                  <TD style={{ fontSize: 'var(--font-size-sm)' }}>{job.projectId ? shortId(job.projectId) : '—'}</TD>
                   <TD>
                     <Badge tone={jobTone(job.status)}>{job.status}</Badge>
                   </TD>
@@ -184,38 +185,23 @@ export function JobsPage() {
       )}
 
       {selectedId && (
-        <Card style={{ marginTop: 24 }}>
-          <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>
-            Job <code style={{ fontSize: 13 }}>{shortId(selectedId)}</code>
+        <Card data-ref="page-jobs-detail-card" style={{ marginTop: 24 }}>
+          <h2 data-ref="page-jobs-detail-heading" style={{ fontSize: 'var(--font-size-xl)', margin: '0 0 8px' }}>
+            Job <code style={{ fontSize: 'var(--font-size-sm)' }}>{shortId(selectedId)}</code>
             {running && (
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}> — running, refreshing…</span>
+              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}> — running, refreshing…</span>
             )}
           </h2>
           {detailError ? (
-            <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+            <p data-ref="page-jobs-detail-error" role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
               Could not load job detail: {detailError}
             </p>
           ) : !detail ? (
             <Spinner label="Loading job detail…" />
           ) : (
             <div>
-              {detail.argv && detail.argv.length > 0 && (
-                <p style={{ margin: '0 0 12px', fontSize: 13 }}>
-                  <code
-                    style={{
-                      display: 'block',
-                      overflowX: 'auto',
-                      whiteSpace: 'pre',
-                      padding: 8,
-                      backgroundColor: 'var(--bg-surface)',
-                      borderRadius: 4,
-                    }}
-                  >
-                    $ node src/index.js {detail.argv.join(' ')}
-                  </code>
-                </p>
-              )}
               <pre
+                data-ref="page-jobs-detail-logs"
                 aria-label="Job logs"
                 style={{
                   margin: 0,
@@ -223,7 +209,7 @@ export function JobsPage() {
                   overflow: 'auto',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  fontSize: 12,
+                  fontSize: 'var(--font-size-sm)',
                   lineHeight: 1.5,
                   padding: 12,
                   backgroundColor: 'var(--bg-surface)',
@@ -233,7 +219,7 @@ export function JobsPage() {
               >
                 {(detail.logs ?? detail.logTail ?? '').trim() || '(no output yet)'}
               </pre>
-              <p style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+              <p data-ref="page-jobs-detail-status" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                 Status: {detail.status}
                 {detail.exitCode !== null && detail.exitCode !== undefined
                   ? ` (exit ${detail.exitCode})`

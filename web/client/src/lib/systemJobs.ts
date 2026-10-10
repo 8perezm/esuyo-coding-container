@@ -34,6 +34,35 @@ export function parseKeepInput(raw: string): KeepParse {
   return { keep: n };
 }
 
+const IMAGE_SEMVER_RE = /^v(\d+)\.(\d+)\.(\d+)$/;
+
+/** Strict vMAJOR.MINOR.PATCH check (mirrors src/utils/semver.js isSemver). */
+export function isImageVersionTag(tag: string): boolean {
+  return typeof tag === 'string' && IMAGE_SEMVER_RE.test(tag);
+}
+
+/** Numeric comparison of two semver tags (assumes both are semver). */
+export function compareImageVersionTags(a: string, b: string): number {
+  const pa = a.match(IMAGE_SEMVER_RE)!.slice(1).map(Number);
+  const pb = b.match(IMAGE_SEMVER_RE)!.slice(1).map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Sort image tags newest-first for the Versions table.
+ * Semver tags come first (numerically descending), then non-semver tags
+ * (lexicographically ascending — they are not part of the version history).
+ * Mirrors the CLI `system list` display order (semver descending).
+ */
+export function sortTagsNewestFirst(tags: string[]): string[] {
+  const semver = tags.filter(isImageVersionTag).sort(compareImageVersionTags).reverse();
+  const other = tags.filter((t) => !isImageVersionTag(t)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...semver, ...other];
+}
+
 /** system-gc args: keep omitted => server default; preview forces dryRun. */
 export function buildSystemGcArgs(
   keepRaw: string,

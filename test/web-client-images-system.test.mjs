@@ -91,10 +91,12 @@ describe('ImagesPage contract', () => {
 });
 
 describe('SystemPage contract', () => {
-  it('exports SystemPage and renders ProjectPicker', () => {
+  it('exports SystemPage without a ProjectPicker (uses active project silently)', () => {
     assert.match(system, /export function SystemPage\(\)/);
-    assert.match(system, /<ProjectPicker/);
+    assert.ok(!system.includes('<ProjectPicker'), 'System page must not render a ProjectPicker');
+    assert.ok(!system.includes('page-system-project-card'), 'project picker card must be removed');
     assert.match(system, /from '\.\.\/lib\/projects'/);
+    assert.match(system, /useProjects/);
   });
 
   it('loads the global config and shows path + exists badge', () => {
@@ -103,10 +105,10 @@ describe('SystemPage contract', () => {
     assert.ok(system.includes('missing'), 'missing missing badge');
   });
 
-  it('edits rawYaml in a scrolling mono textarea (min-height 300px) and saves via PUT', () => {
+  it('edits rawYaml in the shared YamlEditor and saves via PUT', () => {
     assert.ok(system.includes('rawYaml'), 'missing rawYaml binding');
-    assert.match(system, /<textarea/);
-    assert.match(system, /minHeight: 300/);
+    assert.match(system, /YamlEditor/);
+    assert.ok(!system.includes('<textarea'), 'must use YamlEditor, not a plain textarea');
     assert.match(system, /api\.put<.*>\('\/api\/global-config'/);
     assert.ok(system.includes('Save global config'), 'missing save button');
   });

@@ -7,7 +7,21 @@
   --font-brand: 'Patua One', Georgia, serif;
   --font-heading: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Manrope', ui-sans-serif, system-ui, sans-serif;
-  --font-size-brand: 30px;
+  --font-size-brand: 26px;
+
+  /* Central type scale — change these values to resize text globally.
+     Body copy, components, and pages all reference these tokens
+     instead of hardcoded sizes. */
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 15px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 18px;
+  --font-size-4xl: 20px;
+  --font-size-5xl: 24px;
 
   /* Grayscale ramp (light) */
   --gray-50: #fafafa;
@@ -53,17 +67,17 @@
 }
 
 [data-theme='dark'] {
-  /* Grayscale ramp (dark) */
-  --gray-50: #09090b;
-  --gray-100: #111113;
-  --gray-200: #18181b;
-  --gray-300: #27272a;
-  --gray-400: #3f3f46;
-  --gray-500: #52525b;
-  --gray-600: #71717a;
-  --gray-700: #a1a1aa;
-  --gray-800: #d4d4d8;
-  --gray-900: #fafafa;
+  /* Grayscale ramp (dark) — inverted so gray-200+ stays visible on dark surfaces */
+  --gray-50: #18181b;
+  --gray-100: #27272a;
+  --gray-200: #71717a;
+  --gray-300: #8e8e96;
+  --gray-400: #a1a1aa;
+  --gray-500: #a1a1aa;
+  --gray-600: #d4d4d8;
+  --gray-700: #e4e4e7;
+  --gray-800: #fafafa;
+  --gray-900: #ffffff;
 
   --accent: #3b82f6;
   --accent-hover: #2563eb;
@@ -79,16 +93,16 @@
 
   /* Semantic tokens (dark) */
   --bg-surface: #09090b;
-  --bg-card: #18181b;
-  --bg-sidebar: #111113;
-  --bg-header: #111113;
-  --bg-table-header: #111113;
-  --bg-row-alt: #1c1c1f;
-  --bg-row-hover: #27272a;
+  --bg-card: #27272a;
+  --bg-sidebar: #1e1e21;
+  --bg-header: #1e1e21;
+  --bg-table-header: #27272a;
+  --bg-row-alt: #2e2e33;
+  --bg-row-hover: #3f3f46;
   --text-primary: #fafafa;
   --text-secondary: #d4d4d8;
   --text-muted: #a8a29e;
-  --border-color: #27272a;
+  --border-color: #71717a;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -100,6 +114,7 @@
 
 html {
   font-family: var(--font-body);
+  font-size: 14px;
 }
 
 body {
@@ -107,6 +122,8 @@ body {
   background-color: var(--bg-surface);
   color: var(--text-primary);
   font-family: var(--font-body);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -199,7 +216,7 @@ a {
     color: var(--text-secondary);
     text-decoration: none;
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--font-size-md);
   }
 
   .nav-item:hover {
@@ -223,13 +240,13 @@ a {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    min-height: 44px;
-    padding: 10px 20px;
-    border-radius: 8px;
+    gap: 6px;
+    min-height: 32px;
+    padding: 6px 12px;
+    border-radius: 6px;
     font-family: var(--font-body);
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     border: 1px solid transparent;
     transition: background-color 120ms ease, border-color 120ms ease;
@@ -275,7 +292,7 @@ a {
   /* ---- Forms ---- */
   .label {
     display: block;
-    font-size: 14px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--text-secondary);
     margin-bottom: 6px;
@@ -290,7 +307,7 @@ a {
     background-color: var(--bg-card);
     color: var(--text-primary);
     font-family: var(--font-body);
-    font-size: 14px;
+    font-size: var(--font-size-md);
   }
 
   .input::placeholder {
@@ -308,7 +325,7 @@ a {
   .data-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: var(--font-size-md);
     min-width: 560px;
   }
 
@@ -347,7 +364,7 @@ a {
     align-items: center;
     padding: 2px 10px;
     border-radius: 9999px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     background-color: var(--bg-row-hover);
     color: var(--text-secondary);
@@ -427,7 +444,7 @@ a {
     background: transparent;
     color: var(--text-primary);
     font-family: var(--font-body);
-    font-size: 14px;
+    font-size: var(--font-size-md);
     cursor: pointer;
     text-align: left;
   }
@@ -442,6 +459,10 @@ a {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 16px;
+  }
+
+  .stat-grid .card {
+    padding: 12px 16px;
   }
 
   /* ---- Modal ---- */
@@ -528,13 +549,17 @@ a {
     display: inline-flex !important;
   }
 
-  /* 44px touch targets on mobile */
-  .btn,
+  /* Compact touch targets on mobile — buttons stay small, nav keeps 44px */
   .nav-item,
-  .profile-menu-item,
-  .icon-button {
+  .profile-menu-item {
     min-height: 44px;
-    min-width: 44px;
+  }
+  .btn {
+    min-height: 32px;
+  }
+  .icon-button {
+    min-height: 32px;
+    min-width: 32px;
   }
 }
 
@@ -558,9 +583,9 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-primary);
@@ -569,4 +594,100 @@ a {
 
 .icon-button:hover {
   background-color: var(--bg-row-hover);
+}
+
+/* ---- Tabs (shadcn-style) ---- */
+.tabs-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-surface);
+}
+
+.tabs-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.tabs-trigger:hover {
+  color: var(--text-primary);
+}
+
+.tabs-trigger[data-state='active'] {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabs-trigger:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.tabs-trigger-activity {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: var(--accent);
+  flex: none;
+}
+
+/* ---- Tabs line variant (shadcn-style underline) ----
+   Usage: <TabsList className="tabs-list-line"> + <TabsTrigger className="tabs-trigger-line"> */
+.tabs-list.tabs-list-line {
+  display: flex;
+  align-items: stretch;
+  gap: 24px;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background-color: transparent;
+  overflow-x: auto;
+}
+
+.tabs-trigger.tabs-trigger-line {
+  min-height: 44px;
+  padding: 8px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -1px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.tabs-trigger.tabs-trigger-line:hover {
+  color: var(--text-primary);
+}
+
+.tabs-trigger.tabs-trigger-line[data-state='active'] {
+  background: transparent;
+  border: none;
+  border-bottom-color: var(--accent);
+  border-bottom-width: 2px;
+  border-bottom-style: solid;
+  box-shadow: none;
+  color: var(--text-primary);
 }

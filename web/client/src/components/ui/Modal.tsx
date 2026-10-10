@@ -18,11 +18,11 @@ export function Modal({ title, onClose, children }: ModalProps) {
   }, [onClose]);
 
   return (
-    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={title} className="modal-panel">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 18 }}>{title}</h2>
-          <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}>
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()} data-ref="modal-overlay">
+      <div role="dialog" aria-modal="true" aria-label={title} className="modal-panel" data-ref="modal-panel">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }} data-ref="modal-header">
+          <h2 style={{ fontSize: 'var(--font-size-2xl)' }} data-ref="modal-title">{title}</h2>
+          <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose} data-ref="modal-close-button">
             <X size={20} aria-hidden="true" />
           </button>
         </div>

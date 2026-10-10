@@ -3,10 +3,11 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { ProjectPicker, useProjects } from '../lib/projects';
+import { JobOutput } from '../components/JobOutput';
 import {
-  Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   PageHeader,
   Spinner,
@@ -53,7 +54,7 @@ const monoStyle = {
 
 const fieldLabelStyle = {
   margin: '0 0 4px',
-  fontSize: 13,
+  fontSize: 'var(--font-size-sm)',
   color: 'var(--text-muted)',
   fontWeight: 600,
 } as const;
@@ -85,6 +86,7 @@ export function SshKeysPage() {
   const [rotating, setRotating] = useState(false);
   const [rotateJob, setRotateJob] = useState<JobInfo | null>(null);
   const [rotateError, setRotateError] = useState<string | null>(null);
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
 
   const loadAliases = useCallback(async () => {
     setAliasesLoading(true);
@@ -154,10 +156,6 @@ export function SshKeysPage() {
 
   async function handleRotate() {
     if (!activeProjectId) return;
-    const confirmed = window.confirm(
-      'Rotate the SSH key for this project? Existing access will stop working until you redeploy with the new key.',
-    );
-    if (!confirmed) return;
     setRotating(true);
     setRotateError(null);
     setRotateJob(null);
@@ -172,26 +170,27 @@ export function SshKeysPage() {
       setRotateError(errMessage(err));
     } finally {
       setRotating(false);
+      setShowRotateConfirm(false);
     }
   }
 
   return (
-    <div>
+    <div data-ref="page-ssh-keys">
       <PageHeader
         title="SSH & Keys"
         description="SSH aliases, project keys, and key rotation."
         actions={
-          <Button variant="secondary" onClick={() => void loadAliases()} disabled={aliasesLoading}>
+          <Button data-ref="page-ssh-keys-refresh-aliases" variant="secondary" onClick={() => void loadAliases()} disabled={aliasesLoading}>
             {aliasesLoading ? 'Refreshing…' : 'Refresh aliases'}
           </Button>
         }
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        <Card>
-          <h2 style={{ fontSize: 18, marginBottom: 16 }}>SSH aliases</h2>
+        <Card data-ref="page-ssh-keys-aliases-card">
+          <h2 data-ref="page-ssh-keys-heading-aliases" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 16 }}>SSH aliases</h2>
           {aliasesError ? (
-            <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+            <p data-ref="page-ssh-keys-alert-aliases" role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
               Could not load SSH aliases: {aliasesError}
             </p>
           ) : aliasesLoading && entries === null ? (
@@ -199,8 +198,8 @@ export function SshKeysPage() {
           ) : entries !== null && entries.length === 0 ? (
             <EmptyState title="No SSH aliases" description="Deploy a project to register one." />
           ) : entries ? (
-            <TableContainer>
-              <Table>
+            <TableContainer data-ref="page-ssh-keys-table-container-aliases">
+              <Table data-ref="page-ssh-keys-table-aliases">
                 <THead>
                   <TR>
                     <TH>Alias</TH>
@@ -226,16 +225,17 @@ export function SshKeysPage() {
           ) : null}
         </Card>
 
-        <Card>
-          <h2 style={{ fontSize: 18, marginBottom: 8 }}>Refresh aliases</h2>
-          <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--text-muted)' }}>
+        <Card data-ref="page-ssh-keys-refresh-card">
+          <h2 data-ref="page-ssh-keys-heading-refresh" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 8 }}>Refresh aliases</h2>
+          <p style={{ margin: '0 0 16px', fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}>
             Node addresses can go stale after cluster node changes. Refresh the SSH alias list to pick up the
             current IPs.
           </p>
           <label
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 16, cursor: 'pointer' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-size-md)', marginBottom: 16, cursor: 'pointer' }}
           >
             <input
+              data-ref="page-ssh-keys-dryrun-field"
               type="checkbox"
               checked={dryRun}
               onChange={(e) => setDryRun(e.target.checked)}
@@ -243,61 +243,64 @@ export function SshKeysPage() {
             />
             Dry run (preview changes without applying them)
           </label>
-          <Button onClick={() => void handleRefresh()} disabled={refreshing}>
+          <Button data-ref="page-ssh-keys-submit-refresh" onClick={() => void handleRefresh()} disabled={refreshing}>
             {refreshing ? 'Starting…' : 'Update alias list'}
           </Button>
+          {refreshJob ? (
+            <JobOutput key={refreshJob.id} job={{ id: refreshJob.id, op: 'list-update', status: refreshJob.status ?? 'running' }} dataRef="page-ssh-keys-refresh-job" />
+          ) : null}
           {refreshError ? (
-            <p role="alert" style={{ margin: '12px 0 0', fontSize: 14 }}>
+            <p data-ref="page-ssh-keys-alert-refresh" role="alert" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-md)' }}>
               Could not start the alias refresh: {refreshError}
             </p>
           ) : null}
           {refreshJob ? (
-            <p style={{ margin: '12px 0 0', fontSize: 14 }}>
-              Update job started: <span style={monoStyle}>{refreshJob.id}</span>{' '}
-              <Badge tone="accent">{refreshJob.status ?? 'running'}</Badge> — follow its progress on the{' '}
-              <Link to="/jobs">jobs page</Link>, then reload the aliases table above once it finishes.
+            <p data-ref="page-ssh-keys-status-refresh" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+              Reload the aliases table above once the job finishes. Full history on the{' '}
+              <Link data-ref="page-ssh-keys-link-jobs-refresh" to="/jobs">jobs page</Link>.
             </p>
           ) : null}
         </Card>
 
-        <Card>
-          <h2 style={{ fontSize: 18, marginBottom: 16 }}>Project key</h2>
+        <Card data-ref="page-ssh-keys-project-card">
+          <h2 data-ref="page-ssh-keys-heading-project" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 16 }}>Project key</h2>
           <div style={{ marginBottom: 16 }}>
             <ProjectPicker />
           </div>
           {!activeProjectId ? (
-            <p style={{ margin: 0, fontSize: 14, color: 'var(--text-muted)' }}>
+            <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}>
               Select a project to view its SSH key.
             </p>
           ) : keyLoading ? (
             <Spinner label="Loading key…" />
           ) : keyError ? (
-            <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+            <p data-ref="page-ssh-keys-alert-key" role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
               Could not load key: {keyError}
             </p>
           ) : key ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div data-ref="page-ssh-keys-key-details" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'grid', gap: 12 }}>
                 <div>
                   <p style={fieldLabelStyle}>Private key path</p>
-                  <p style={{ ...monoStyle, margin: 0, fontSize: 14, overflowWrap: 'anywhere' }}>{key.private}</p>
+                  <p style={{ ...monoStyle, margin: 0, fontSize: 'var(--font-size-md)', overflowWrap: 'anywhere' }}>{key.private}</p>
                 </div>
                 <div>
                   <p style={fieldLabelStyle}>Public key path</p>
-                  <p style={{ ...monoStyle, margin: 0, fontSize: 14, overflowWrap: 'anywhere' }}>{key.public}</p>
+                  <p style={{ ...monoStyle, margin: 0, fontSize: 'var(--font-size-md)', overflowWrap: 'anywhere' }}>{key.public}</p>
                 </div>
                 <div>
                   <p style={fieldLabelStyle}>Resolved image</p>
-                  <p style={{ ...monoStyle, margin: 0, fontSize: 14, overflowWrap: 'anywhere' }}>{key.image}</p>
+                  <p style={{ ...monoStyle, margin: 0, fontSize: 'var(--font-size-md)', overflowWrap: 'anywhere' }}>{key.image}</p>
                 </div>
                 <div>
                   <p style={fieldLabelStyle}>Fingerprint</p>
-                  <p style={{ ...monoStyle, margin: 0, fontSize: 14 }}>{key.fingerprint}</p>
+                  <p style={{ ...monoStyle, margin: 0, fontSize: 'var(--font-size-md)' }}>{key.fingerprint}</p>
                 </div>
               </div>
               <div>
                 <p style={fieldLabelStyle}>Public key</p>
                 <pre
+                  data-ref="page-ssh-keys-publickey-block"
                   style={{
                     ...monoStyle,
                     margin: 0,
@@ -305,7 +308,7 @@ export function SshKeysPage() {
                     borderRadius: 8,
                     border: '1px solid var(--border-color)',
                     backgroundColor: 'var(--bg-surface)',
-                    fontSize: 13,
+                    fontSize: 'var(--font-size-sm)',
                     whiteSpace: 'pre',
                     overflow: 'auto',
                     maxHeight: 240,
@@ -315,24 +318,25 @@ export function SshKeysPage() {
                 </pre>
               </div>
               <div>
-                <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--text-muted)' }}>
+                <p style={{ margin: '0 0 12px', fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}>
                   Warning: rotating the key invalidates existing access. Redeploy the project afterwards so the new
                   key is distributed.
                 </p>
-                <Button variant="secondary" onClick={() => void handleRotate()} disabled={rotating}>
+                <Button data-ref="page-ssh-keys-submit-rotate" variant="secondary" onClick={() => setShowRotateConfirm(true)} disabled={rotating}>
                   {rotating ? 'Starting…' : 'Rotate key'}
                 </Button>
+                {rotateJob ? (
+                  <JobOutput key={rotateJob.id} job={{ id: rotateJob.id, op: 'key-rotate', status: rotateJob.status ?? 'running' }} dataRef="page-ssh-keys-rotate-job" />
+                ) : null}
                 {rotateError ? (
-                  <p role="alert" style={{ margin: '12px 0 0', fontSize: 14 }}>
+                  <p data-ref="page-ssh-keys-alert-rotate" role="alert" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-md)' }}>
                     Could not start key rotation: {rotateError}
                   </p>
                 ) : null}
                 {rotateJob ? (
-                  <p style={{ margin: '12px 0 0', fontSize: 14 }}>
-                    Rotation job started: <span style={monoStyle}>{rotateJob.id}</span>{' '}
-                    <Badge tone="accent">{rotateJob.status ?? 'running'}</Badge> — follow its progress on the{' '}
-                    <Link to="/jobs">jobs page</Link>. The key details above may be stale until the job finishes;
-                    redeploy once it completes.
+                  <p data-ref="page-ssh-keys-status-rotate" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+                    The key details above may be stale until the job finishes; redeploy once it completes. Full history on the{' '}
+                    <Link data-ref="page-ssh-keys-link-jobs-rotate" to="/jobs">jobs page</Link>.
                   </p>
                 ) : null}
               </div>
@@ -340,6 +344,21 @@ export function SshKeysPage() {
           ) : null}
         </Card>
       </div>
+
+      {showRotateConfirm && (
+        <ConfirmDialog
+          title="Rotate SSH key?"
+          confirmLabel="Rotate key"
+          onCancel={() => setShowRotateConfirm(false)}
+          onConfirm={() => void handleRotate()}
+          confirming={rotating}
+        >
+          <p style={{ margin: 0 }}>
+            Existing access will stop working until you redeploy with the new key. Redeploy the project
+            afterwards so the new key is distributed.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

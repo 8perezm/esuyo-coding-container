@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Wrench } from 'lucide-react';
 import { api } from '../lib/api';
 import { buildSetupArgs } from './job-helpers';
+import { JobOutput } from '../components/JobOutput';
 import { Badge, Button, Card, Input, Label, PageHeader, Spinner } from '../components/ui';
 
 interface GlobalConfigResponse {
@@ -68,27 +69,27 @@ export function SetupPage() {
   );
 
   return (
-    <div>
+    <div data-ref="page-setup">
       <PageHeader
         title="Setup"
         description="One-time environment setup: global config, Dockerfile, and SSH key pair."
       />
 
-      <Card style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>Global config status</h2>
+      <Card data-ref="page-setup-config-card" style={{ marginBottom: 24 }}>
+        <h2 data-ref="page-setup-config-heading" style={{ fontSize: 'var(--font-size-xl)', margin: '0 0 8px' }}>Global config status</h2>
         {!config && !configError ? (
           <Spinner label="Loading global config status…" />
         ) : configError ? (
-          <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+          <p data-ref="page-setup-config-error" role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
             Could not load global config status: {configError}
           </p>
         ) : (
           config && (
-            <p style={{ margin: 0, fontSize: 14 }}>
+            <p data-ref="page-setup-config-status" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
               <Badge tone={config.exists ? 'default' : 'accent'}>
                 {config.exists ? 'exists' : 'missing'}
               </Badge>{' '}
-              <code style={{ fontSize: 13 }}>{config.path}</code>
+              <code style={{ fontSize: 'var(--font-size-sm)' }}>{config.path}</code>
               {!config.exists && (
                 <span style={{ color: 'var(--text-muted)' }}>
                   {' '}
@@ -100,21 +101,23 @@ export function SetupPage() {
         )}
       </Card>
 
-      <Card>
+      <Card data-ref="page-setup-form-card">
         <h2
-          style={{ fontSize: 16, margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}
+          data-ref="page-setup-form-heading"
+          style={{ fontSize: 'var(--font-size-xl)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <Wrench size={18} aria-hidden="true" /> Run setup
         </h2>
-        <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 14 }}>
+        <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }}>
           Never overwrites existing files. Values left blank fall back to interactive prompts on
           the server, or clearly-marked placeholders when non-interactive.
         </p>
-        <form onSubmit={(e) => void submit(e)}>
+        <form data-ref="page-setup-form" onSubmit={(e) => void submit(e)}>
           <div style={{ display: 'grid', gap: 12, maxWidth: 520, marginBottom: 16 }}>
             <div>
               <Label htmlFor="setup-registry">Container registry (optional)</Label>
               <Input
+                data-ref="page-setup-registry-input"
                 id="setup-registry"
                 value={registry}
                 onChange={(e) => setRegistry(e.target.value)}
@@ -126,6 +129,7 @@ export function SetupPage() {
             <div>
               <Label htmlFor="setup-nfs-server">NFS server (optional)</Label>
               <Input
+                data-ref="page-setup-nfs-server-input"
                 id="setup-nfs-server"
                 value={nfsServer}
                 onChange={(e) => setNfsServer(e.target.value)}
@@ -137,6 +141,7 @@ export function SetupPage() {
             <div>
               <Label htmlFor="setup-nfs-base-path">NFS base path (optional)</Label>
               <Input
+                data-ref="page-setup-nfs-base-path-input"
                 id="setup-nfs-base-path"
                 value={nfsBasePath}
                 onChange={(e) => setNfsBasePath(e.target.value)}
@@ -146,25 +151,21 @@ export function SetupPage() {
               />
             </div>
           </div>
-          <Button type="submit" disabled={pending}>
+          <Button data-ref="page-setup-run-button" type="submit" disabled={pending}>
             {pending ? 'Starting…' : 'Run setup'}
           </Button>
         </form>
-        <p style={{ margin: '16px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-          Afterwards, on a fresh cluster run <Link to="/system">system init</Link> once, then{' '}
-          <Link to="/deploy">create</Link> in a project folder.
+        {result ? (
+          <JobOutput key={result.id} job={result} dataRef="page-setup-job" />
+        ) : null}
+        <p style={{ margin: '16px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+          Afterwards, on a fresh cluster run <Link data-ref="page-setup-system-link" to="/system">system init</Link> once, then{' '}
+          <Link data-ref="page-setup-deploy-link" to="/projects">create</Link> from a project page.
         </p>
       </Card>
 
-      {result && (
-        <Card style={{ marginTop: 16 }}>
-          <p style={{ margin: 0, fontSize: 14 }}>
-            Job started: <code>{result.id}</code> ({result.status}) — <Link to="/jobs">View jobs</Link>
-          </p>
-        </Card>
-      )}
       {error && (
-        <p role="alert" style={{ color: 'var(--color-error, #b3261e)', fontSize: 14, marginTop: 12 }}>
+        <p data-ref="page-setup-error" role="alert" style={{ color: 'var(--color-error, #b3261e)', fontSize: 'var(--font-size-md)', marginTop: 12 }}>
           {error}
         </p>
       )}

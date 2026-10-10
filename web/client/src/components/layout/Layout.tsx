@@ -5,11 +5,11 @@ import { Sidebar } from './Sidebar';
 import { useTheme } from '../../theme/useTheme';
 
 export function Layout() {
-  const { theme, setTheme, toggleTheme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div>
+    <div data-ref="app-layout">
       <Header
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -18,10 +18,8 @@ export function Layout() {
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        theme={theme}
-        onSelectTheme={setTheme}
       />
-      <main className="app-main" id="main-content">
+      <main className="app-main" id="main-content" data-ref="app-main">
         <Outlet />
       </main>
     </div>

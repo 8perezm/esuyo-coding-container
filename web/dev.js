@@ -2,7 +2,8 @@
 /**
  * GUI dev launcher: runs the backend API and the Vite frontend together.
  *
- *   npm run dev          # backend (:3000, from web/.env PORT) + Vite (:5173)
+ *   npm run dev          # backend (:3001, from web/.env PORT) + Vite (:3000)
+ *   npm run dev:kill     # kill orphaned dev servers still holding those ports
  *
  * Zero dependencies (node: builtins only). `npm --prefix` is not used so the
  * client keeps its own lockfile/install; the client must be installed once:
@@ -35,7 +36,20 @@ if (!fs.existsSync(path.join(CLIENT_DIR, "node_modules"))) {
 }
 
 function launch(name, cmd, args, cwd) {
-  const child = spawn(cmd, args, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  // On Windows `npm` is npm.cmd, which Node can only spawn via a shell —
+  // plain spawn("npm") fails with ENOENT. Only the npm child gets a shell;
+  // the node child (process.execPath, often "C:\Program Files\...") must
+  // NOT use one or its space-containing path breaks.
+  const useShell = process.platform === "win32" && cmd === "npm";
+  const child = spawn(cmd, args, {
+    cwd,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(useShell ? { shell: true } : {}),
+  });
+  child.on("error", (err) => {
+    console.error(`[${name}] failed to start "${cmd} ${args.join(" ")}": ${err.message}`);
+  });
   const tag = (chunk, out) => {
     for (const line of String(chunk).split(/\n/)) {
       if (line.trim()) out.write(`[${name}] ${line}\n`);

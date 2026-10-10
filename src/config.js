@@ -202,18 +202,22 @@ export function resolveDefaultConfigPath(explicit) {
  *
  * @param {string} configPath path to the local project yaml file
  * @param {object} overrides flat-ish overrides applied on top (e.g. from CLI flags)
+ * @param {object} opts optional knobs; `opts.globalConfigPath` swaps which
+ *   file backs the global layer (used to validate an unsaved global draft
+ *   without touching the real file on disk).
  */
-export function loadConfig(configPath, overrides = {}) {
+export function loadConfig(configPath, overrides = {}, opts = {}) {
   const resolved = path.resolve(configPath);
   if (!fs.existsSync(resolved)) {
     throw new Error(`Config file not found: ${resolved}`);
   }
   const localDir = path.dirname(resolved);
-  const gDir = globalConfigDir();
+  const gPath = opts.globalConfigPath ? path.resolve(opts.globalConfigPath) : globalConfigPath();
+  const gDir = path.dirname(gPath);
 
   let cfg = withPaths(DEFAULTS, localDir);
-  if (fs.existsSync(globalConfigPath())) {
-    cfg = deepMerge(cfg, withPaths(readYaml(globalConfigPath()), gDir));
+  if (fs.existsSync(gPath)) {
+    cfg = deepMerge(cfg, withPaths(readYaml(gPath), gDir));
   }
   const local = readYaml(resolved);
   cfg = deepMerge(cfg, withPaths(local, localDir));

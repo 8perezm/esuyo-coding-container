@@ -1,5 +1,6 @@
 export { Button } from './Button';
 export { Card } from './Card';
+export { ConfirmDialog } from './ConfirmDialog';
 export { Input } from './Input';
 export { Label } from './Label';
 export { Table, TableContainer, TBody, TD, TH, THead, TR } from './Table';
@@ -8,3 +9,4 @@ export { Modal } from './Modal';
 export { Spinner } from './Spinner';
 export { PageHeader } from './PageHeader';
 export { EmptyState } from './EmptyState';
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './Tabs';

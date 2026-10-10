@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Contract tests for the Projects and Deploy frontend pages.
+// Contract tests for the Projects pages and the per-project Deploy tab.
 // The client has no component test runner (and no new deps are allowed),
 // so these tests statically assert the pages implement the backend API
 // contracts from web/server/server.js.
@@ -12,13 +12,17 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const libPath = path.join(root, 'web/client/src/lib/projects.tsx');
 const projectsPath = path.join(root, 'web/client/src/pages/ProjectsPage.tsx');
-const deployPath = path.join(root, 'web/client/src/pages/DeployPage.tsx');
+const editPath = path.join(root, 'web/client/src/pages/ProjectEditPage.tsx');
+const deployTabPath = path.join(root, 'web/client/src/components/ProjectDeployTab.tsx');
 const appPath = path.join(root, 'web/client/src/App.tsx');
+const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.tsx');
 
 const lib = await readFile(libPath, 'utf8');
 const projects = await readFile(projectsPath, 'utf8');
-const deploy = await readFile(deployPath, 'utf8');
+const edit = await readFile(editPath, 'utf8');
+const deploy = await readFile(deployTabPath, 'utf8');
 const app = await readFile(appPath, 'utf8');
+const sidebar = await readFile(sidebarPath, 'utf8');
 
 describe('projects lib contract', () => {
   it('exports ProjectsProvider, useProjects, and ProjectPicker', () => {
@@ -54,29 +58,34 @@ describe('ProjectsPage contract', () => {
     assert.match(projects, /useProjects/);
   });
 
-  it('renders a table with Name, Config path, and actions columns', () => {
+  it('renders active/inactive tables with Name, Mode, Image, Namespace, NodePort, Actions and no config paths', () => {
     assert.match(projects, /<Table/);
-    for (const col of ['Name', 'Config path', 'Actions']) {
+    for (const col of ['Name', 'Mode', 'Image', 'Namespace', 'NodePort', 'Actions']) {
       assert.ok(projects.includes(col), `missing column ${col}`);
+    }
+    assert.ok(!projects.includes('Config path'), 'config paths must not be shown in tables');
+    assert.ok(!projects.includes('page-projects-active-card'), 'active detail card must be removed');
+    for (const ref of ['page-projects-row-create', 'page-projects-row-deploy', 'page-projects-row-workloads-delete']) {
+      assert.ok(projects.includes(ref), `missing per-row action ${ref}`);
     }
   });
 
-  it('marks the active project with a Badge and offers Select active', () => {
+  it('marks the active project with a Badge and no Select active button', () => {
     assert.match(projects, /<Badge/);
     assert.ok(projects.includes('Active'), 'missing Active badge');
-    assert.ok(projects.includes('Select active'), 'missing Select active action');
+    assert.ok(!projects.includes('Select active'), 'Select active action must be removed');
+    assert.ok(!projects.includes('page-projects-row-select'), 'row select ref must be removed');
   });
 
-  it('confirms before DELETE /api/projects/:id and surfaces failures via role=alert', () => {
-    assert.match(projects, /window\.confirm/);
-    assert.match(projects, /\/api\/projects\//);
+  it('confirms workload delete via ConfirmDialog and surfaces failures via role=alert', () => {
+    assert.match(projects, /ConfirmDialog/);
+    assert.ok(projects.includes('page-projects-row-workloads-delete'), 'missing workloads delete action');
     assert.match(projects, /role="alert"/);
   });
 
-  it('adds projects via POST /api/projects with name + configPath, showing errors via role=alert', () => {
-    assert.match(projects, /api\.post<.*>\('\/api\/projects'/);
-    assert.ok(projects.includes('configPath'), 'missing configPath field');
-    assert.ok(projects.includes('Add project'), 'missing add-project form');
+  it('links to /projects/new for adding projects (creation POST lives in ProjectCreatePage)', () => {
+    assert.ok(projects.includes('to="/projects/new"'), 'missing link to /projects/new');
+    assert.ok(projects.includes('Add project'), 'missing add-project affordance');
   });
 
   it('shows an EmptyState when there are no projects and a Spinner while loading', () => {
@@ -106,10 +115,11 @@ describe('ProjectsPage contract', () => {
   });
 });
 
-describe('DeployPage contract', () => {
-  it('exports DeployPage and renders ProjectPicker at the top', () => {
-    assert.match(deploy, /export function DeployPage\(\)/);
-    assert.match(deploy, /<ProjectPicker/);
+describe('ProjectDeployTab contract', () => {
+  it('exports ProjectDeployTab scoped to a single project (no global picker)', () => {
+    assert.match(deploy, /export function ProjectDeployTab\(/);
+    assert.ok(deploy.includes('project: Project') || deploy.includes('{ project }'), 'must take the project as a prop');
+    assert.ok(!deploy.includes('<ProjectPicker'), 'deploy tab must not render a global ProjectPicker');
   });
 
   it('has a tag override input and noWait/skipBuild/skipPush/keepSecrets checkboxes', () => {
@@ -120,15 +130,21 @@ describe('DeployPage contract', () => {
     assert.match(deploy, /type="checkbox"/);
   });
 
-  it('renders Create/Deploy/Build/Push cards plus a danger-zone Delete card', () => {
-    for (const title of ['Create (full pipeline)', 'Deploy', 'Build', 'Push', 'Delete']) {
+  it('renders Create/Deploy/Build/Push cards plus danger-zone Delete and Project GC cards', () => {
+    for (const title of ['Create (full pipeline)', 'Deploy', 'Build', 'Push', 'Delete', 'Project GC']) {
       assert.ok(deploy.includes(title), `missing card ${title}`);
     }
     assert.match(deploy, /<Card/);
   });
 
+  it('runs project GC with keep/dryRun preview affordance', () => {
+    assert.ok(deploy.includes("'gc'"), 'missing gc op');
+    assert.match(deploy, /parseKeep/);
+    assert.ok(deploy.includes('gcDryRun') || deploy.includes('dryRun'), 'missing dry-run flag');
+    assert.ok(/preview/i.test(deploy), 'missing preview affordance');
+  });
+
   it('confirms destructive delete and posts op/projectId/args to POST /api/jobs', () => {
-    assert.match(deploy, /window\.confirm/);
     assert.match(deploy, /api\.post<.*>\('\/api\/jobs'/);
     assert.ok(deploy.includes('projectId'), 'jobs must carry projectId');
     for (const arg of ['skipBuild', 'skipPush', 'noWait', 'keepSecrets']) {
@@ -147,19 +163,35 @@ describe('DeployPage contract', () => {
     assert.match(deploy, /global/i);
     assert.ok(deploy.includes('refuse') || deploy.includes('refused'), 'missing refusal hint');
   });
+});
 
-  it('shows an EmptyState linking to /projects when there are no projects', () => {
-    assert.match(deploy, /EmptyState/);
-    assert.ok(deploy.includes('to="/projects"'), 'missing link to /projects');
+describe('ProjectEditPage deploy tab contract', () => {
+  it('renders Settings/Configuration/Deploy tabs in the shadcn line variant', () => {
+    assert.match(edit, /<Tabs/);
+    assert.match(edit, /<TabsList/);
+    assert.match(edit, /<TabsTrigger/);
+    assert.match(edit, /<TabsContent/);
+    assert.ok(edit.includes('tabs-list-line'), 'TabsList must use the line variant');
+    assert.ok(edit.includes('tabs-trigger-line'), 'TabsTrigger must use the line variant');
+    for (const value of ['value="settings"', 'value="config"', 'value="deploy"']) {
+      assert.ok(edit.includes(value), `missing tab ${value}`);
+    }
+  });
+
+  it('renders the deploy tab via ProjectDeployTab for the current project', () => {
+    assert.match(edit, /ProjectDeployTab/);
+    assert.ok(edit.includes('<ProjectDeployTab project={project}'), 'deploy tab must render for the edited project');
+    assert.ok(edit.includes('page-project-edit-tab-deploy'), 'missing deploy tab ref');
+    assert.ok(edit.includes('page-project-edit-panel-deploy'), 'missing deploy panel ref');
   });
 });
 
 describe('App routes contract', () => {
-  it('mounts real Projects and Deploy pages instead of placeholders', () => {
+  it('mounts the Projects page without a standalone Deploy page', () => {
     assert.match(app, /<ProjectsPage \/>/);
-    assert.match(app, /<DeployPage \/>/);
     assert.match(app, /path="projects"/);
-    assert.match(app, /path="deploy"/);
+    assert.ok(!app.includes('DeployPage'), 'standalone DeployPage must be removed');
+    assert.ok(!app.includes('path="deploy"'), 'standalone /deploy route must be removed');
   });
 
   it('wraps Layout with ProjectsProvider inside RequireAuth', () => {
@@ -168,9 +200,11 @@ describe('App routes contract', () => {
     assert.ok(app.indexOf('<ProjectsProvider>') < app.indexOf('<Layout'), 'provider must wrap Layout');
   });
 
-  it('does not route projects/deploy to placeholders', () => {
-    assert.ok(!app.includes('PLACEHOLDERS'), 'projects/deploy must not use placeholder routes');
+  it('does not route projects to placeholders and has no deploy nav entry', () => {
+    assert.ok(!app.includes('PLACEHOLDERS'), 'projects must not use placeholder routes');
     assert.ok(!app.includes('<PlaceholderPage title="Projects"'), 'projects must not be a placeholder');
     assert.ok(!app.includes('<PlaceholderPage title="Deploy"'), 'deploy must not be a placeholder');
+    assert.ok(!sidebar.includes("'/deploy'"), 'Sidebar must not link to /deploy');
+    assert.ok(!sidebar.includes('>Deploy<'), 'Sidebar must not show a Deploy entry');
   });
 });

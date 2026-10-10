@@ -1,23 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Dev proxy targets the cluster dev domain — NEVER localhost — so that
-// same-origin fetch('/api/...') calls work both in dev and when the
-// production build (dist/) is served by the backend (single-server).
+// Dev proxy targets the local API (same `PORT` as web/.env, default 3001) so
+// same-origin fetch('/api/...') calls work in dev. Override with
+// VITE_API_TARGET when the API runs elsewhere.
+const apiTarget = process.env.VITE_API_TARGET ?? 'http://127.0.0.1:3001';
 export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    port: 5173,
+    port: 3000,
     proxy: {
       '/api': {
-        target: 'http://coding-container.cl.esuyo.com:3000',
+        target: apiTarget,
         changeOrigin: true,
       },
     },
   },
   preview: {
     host: true,
-    port: 5173,
+    port: 3000,
   },
 });

@@ -7,6 +7,8 @@ description: Build professional web administration interfaces (admin panels, das
 
 Build professional, accessible web administration interfaces following the layout, typography, theming, and component conventions defined below.
 
+Style all interfaces with **Tailwind CSS** and **shadcn**: use utility classes in markup backed by the design tokens in this skill (see § 4.0), and build interactive components (buttons, dialogs, dropdowns, tabs, tables, forms) from shadcn primitives styled with those tokens. Do not write ad-hoc hardcoded values when a token-backed utility exists.
+
 ---
 
 ## 1. Layout Specification
@@ -184,6 +186,50 @@ Derive semantic tokens from the palette. **Important**: `--text-muted` is adjust
 
 ## 4. Design Guidelines
 
+### 4.0 Styling with Tailwind CSS and shadcn
+
+All styling **MUST use Tailwind CSS**, and interactive components **MUST use shadcn**. Utility classes are the primary styling mechanism; the CSS custom properties in this skill remain the single source of truth for token values.
+
+- **Map tokens into the Tailwind theme** so utilities resolve to them. Extend `fontFamily`, `fontSize`, `colors`, `spacing`, `borderRadius`, and `boxShadow` from the tokens defined in § 2–§ 4.3:
+
+```js
+// tailwind.config.js — utilities resolve to the skill's design tokens
+export default {
+  darkMode: ['selector', '[data-theme="dark"]'],
+  theme: {
+    extend: {
+      fontFamily: {
+        brand: ['var(--font-brand)'],
+        heading: ['var(--font-heading)'],
+        body: ['var(--font-body)'],
+      },
+      colors: {
+        surface: 'var(--bg-surface)',
+        card: 'var(--bg-card)',
+        sidebar: 'var(--bg-sidebar)',
+        header: 'var(--bg-header)',
+        primary: 'var(--text-primary)',
+        secondary: 'var(--text-secondary)',
+        muted: 'var(--text-muted)',
+        border: 'var(--border-color)',
+        accent: {
+          DEFAULT: 'var(--accent)',
+          hover: 'var(--accent-hover)',
+          active: 'var(--accent-active)',
+          soft: 'var(--accent-soft)',
+        },
+      },
+    },
+  },
+}
+```
+
+- **Prefer utilities over custom CSS**: layout, spacing, typography, and colour in markup should use Tailwind classes (e.g. `bg-card text-primary font-body`) instead of one-off stylesheets or inline styles.
+- **Reusable components** (buttons, cards, nav items, tables — see § 5) belong in `@layer components` in the main stylesheet, composed from utilities with `@apply` where the build supports it.
+- **Use shadcn primitives** for interactive components: button, dialog/modal, dropdown-menu (profile menu), tabs, table, input, label, badge, and theme toggle. shadcn components MUST consume this skill's token-backed theme (§ 4.0 mapping) — never shadcn's default theme values. Behavioural requirements (keyboard handling, ARIA, focus management in § 4.5; touch targets in § 4.6) still apply on top of shadcn's built-in accessibility.
+- **No hardcoded values** for colours, fonts, spacing, radii, or shadows when a token-backed utility exists. Arbitrary values (e.g. `text-[#ff0000]`) are not allowed.
+- Keep the `[data-theme="light"]` / `[data-theme="dark"]` token scoping from § 3; with the `darkMode` selector above, `dark:` variants follow the same toggle (persisted via `localStorage`).
+
 ### 4.1 Spacing Scale
 
 Use an 8 px base grid. Common values:
@@ -294,6 +340,8 @@ Before considering an admin interface complete, verify every item:
 - [ ] **Profile block**: Email address visible at bottom of sidebar; hovering or focusing reveals a dropdown menu.
 - [ ] **Dropdown menu**: Contains "Edit profile", "Preferences", "Log off"; closes on Escape or click-outside; updates `aria-expanded`.
 - [ ] **Typography**: Three distinct Google Fonts applied — Patua One for brand, Space Grotesk for headings, Manrope for body text.
+- [ ] **Tailwind CSS**: Styling uses Tailwind utilities mapped to the design tokens (§ 4.0); no hardcoded colours, fonts, spacing, radii, shadows, or arbitrary values.
+- [ ] **shadcn**: Interactive components (buttons, dialogs, dropdowns, tabs, tables, forms) are built from shadcn primitives styled with the skill's tokens, not shadcn defaults.
 - [ ] **Themes**: Both light and dark themes work; toggle button switches between them; default is light theme; theme persisted via `localStorage`.
 - [ ] **Colour discipline**: Page is predominantly black/white/greys; accent palette of ≤3 hues used only on key interactive elements (primary buttons, active nav, focus rings, selected states).
 - [ ] **Accessibility**: WCAG AA contrast in both themes; focus-visible rings visible; keyboard navigable; ARIA attributes correct.
@@ -319,7 +367,9 @@ When building an admin interface, read and use the following reference files loc
 1. **Start from `references/layout.html`** as your HTML skeleton.
 2. **Import `references/fonts.css`** in your `<head>` or via `@import` in your main stylesheet.
 3. **Import `references/theme.css`** after fonts.css; it defines all design tokens.
-4. **Include `references/profile-menu.js`** before the closing `</body>` tag.
-5. **Customize content** inside the provided slots (header logo, nav items, main content area) while preserving the structure and ARIA attributes.
-6. **Persist theme preference** using `localStorage` — read the stored value on page load and apply `[data-theme="light"]` or `[data-theme="dark"]` accordingly.
-7. **Follow the component checklist** (§ 5) and **verification checklist** (§ 6) before considering the interface complete.
+4. **Configure Tailwind CSS** per § 4.0: set `darkMode: ['selector', '[data-theme="dark"]']`, extend the theme from the tokens, and keep the `@tailwind` directives in your main stylesheet.
+5. **Set up shadcn** with the token-backed theme from step 4, and build the § 5 components from shadcn primitives (button, dialog, dropdown-menu, tabs, table, input, label, badge).
+6. **Include `references/profile-menu.js`** before the closing `</body>` tag.
+7. **Customize content** inside the provided slots (header logo, nav items, main content area) while preserving the structure and ARIA attributes.
+8. **Persist theme preference** using `localStorage` — read the stored value on page load and apply `[data-theme="light"]` or `[data-theme="dark"]` accordingly.
+9. **Follow the component checklist** (§ 5) and **verification checklist** (§ 6) before considering the interface complete.

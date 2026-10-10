@@ -109,7 +109,7 @@ export function ProjectPicker({ id = 'project-picker', label = 'Project' }: Proj
   if (loading) return <Spinner label="Loading projects…" />;
   if (error) {
     return (
-      <p role="alert" style={{ margin: 0, fontSize: 14 }}>
+      <p role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
         Could not load projects: {error}
       </p>
     );

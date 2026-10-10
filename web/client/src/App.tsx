@@ -6,12 +6,11 @@ import { ProjectsProvider } from './lib/projects';
 import { OverviewPage } from './pages/OverviewPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ProjectsPage } from './pages/ProjectsPage';
-import { DeployPage } from './pages/DeployPage';
+import { ProjectCreatePage } from './pages/ProjectCreatePage';
+import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { SystemPage } from './pages/SystemPage';
 import { SshKeysPage } from './pages/SshKeysPage';
-import { ValidatePage } from './pages/ValidatePage';
-import { GcPage } from './pages/GcPage';
 import { SetupPage } from './pages/SetupPage';
 import { JobsPage } from './pages/JobsPage';
 
@@ -33,12 +32,11 @@ export function App() {
           >
             <Route index element={<OverviewPage />} />
             <Route path="projects" element={<ProjectsPage />} />
-            <Route path="deploy" element={<DeployPage />} />
+            <Route path="projects/new" element={<ProjectCreatePage />} />
+            <Route path="projects/:id/edit" element={<ProjectEditPage />} />
             <Route path="images" element={<ImagesPage />} />
             <Route path="system" element={<SystemPage />} />
             <Route path="ssh-keys" element={<SshKeysPage />} />
-            <Route path="validate" element={<ValidatePage />} />
-            <Route path="gc" element={<GcPage />} />
             <Route path="setup" element={<SetupPage />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="*" element={<PlaceholderPage title="Not found" description="This page does not exist." />} />

@@ -1,29 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronUp, LogOut, Palette, PencilLine, UserRound } from 'lucide-react';
+import { ChevronUp, LogOut, PencilLine, UserRound } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
-import type { Theme } from '../../theme/useTheme';
 import { EditProfileModal } from './EditProfileModal';
-import { PreferencesModal } from './PreferencesModal';
 
-type MenuId = 'edit' | 'preferences' | 'logout';
+type MenuId = 'edit' | 'logout';
 
 const MENU_ITEMS: Array<{ id: MenuId; label: string; hint: string }> = [
-  { id: 'edit', label: 'Edit profile', hint: 'Change display name' },
-  { id: 'preferences', label: 'Preferences', hint: 'Choose theme' },
+  { id: 'edit', label: 'Edit profile', hint: 'Change display name and password' },
   { id: 'logout', label: 'Log off', hint: 'End session' },
 ];
 
-interface ProfileBlockProps {
-  theme: Theme;
-  onSelectTheme: (theme: Theme) => void;
-}
-
-export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
+export function ProfileBlock() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [modal, setModal] = useState<'edit' | 'preferences' | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -51,9 +43,7 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
   const runAction = async (id: MenuId) => {
     setOpen(false);
     if (id === 'edit') {
-      setModal('edit');
-    } else if (id === 'preferences') {
-      setModal('preferences');
+      setEditOpen(true);
     } else {
       await logout();
       navigate('/login', { replace: true });
@@ -88,12 +78,13 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
   const displayName = user?.displayName || email;
 
   return (
-    <div className="profile-block" ref={containerRef}>
+    <div className="profile-block" ref={containerRef} data-ref="profile-block">
       {open && (
         <div
           className="profile-menu"
           role="menu"
           aria-label="Profile menu"
+          data-ref="profile-menu"
           onKeyDown={onMenuKeyDown}
         >
           {MENU_ITEMS.map((item, i) => (
@@ -105,20 +96,19 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
               type="button"
               role="menuitem"
               className="profile-menu-item"
+              data-ref={`profile-menu-item-${item.id}`}
               tabIndex={focusedIndex === i ? 0 : -1}
               onClick={() => void runAction(item.id)}
               onMouseEnter={() => setFocusedIndex(i)}
             >
               {item.id === 'edit' ? (
                 <PencilLine size={16} aria-hidden="true" />
-              ) : item.id === 'preferences' ? (
-                <Palette size={16} aria-hidden="true" />
               ) : (
                 <LogOut size={16} aria-hidden="true" />
               )}
               <span>
                 <span style={{ display: 'block', fontWeight: 600 }}>{item.label}</span>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{item.hint}</span>
+                <span style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>{item.hint}</span>
               </span>
             </button>
           ))}
@@ -131,10 +121,12 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Profile menu for ${email}`}
+        data-ref="profile-button"
         onClick={() => setOpen((v) => !v)}
       >
         <span
           aria-hidden="true"
+          data-ref="profile-avatar"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -149,12 +141,12 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
         >
           <UserRound size={18} />
         </span>
-        <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: 'block', fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0 }} data-ref="profile-names">
+          <span style={{ display: 'block', fontWeight: 600, fontSize: 'var(--font-size-md)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {displayName}
           </span>
           {user?.displayName && (
-            <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {email}
             </span>
           )}
@@ -162,10 +154,7 @@ export function ProfileBlock({ theme, onSelectTheme }: ProfileBlockProps) {
         <ChevronUp size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
       </button>
 
-      {modal === 'edit' && <EditProfileModal onClose={() => setModal(null)} />}
-      {modal === 'preferences' && (
-        <PreferencesModal theme={theme} onSelectTheme={onSelectTheme} onClose={() => setModal(null)} />
-      )}
+      {editOpen && <EditProfileModal onClose={() => setEditOpen(false)} />}
     </div>
   );
 }

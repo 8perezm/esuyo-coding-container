@@ -29,7 +29,13 @@ import { loadConfig, imageRef, globalConfigPath } from "../../src/config.js";
 import { validate } from "../../src/commands/validate.js";
 import { listHostEntries } from "../../src/utils/ssh-config.js";
 import { ensureKeyPair, readPublicKey } from "../../src/utils/keys.js";
-import { getSystemConfig, resolveDeployTag } from "../../src/utils/system-config.js";
+import {
+  getSystemConfig,
+  kubectlExec,
+  resolveDeployTag,
+} from "../../src/utils/system-config.js";
+import { exec } from "../../src/utils/exec.js";
+import { sidecarNodePorts, webPorts } from "../../src/utils/manifest.js";
 import { listTags } from "../../src/utils/registry-api.js";
 
 // ---------------------------------------------------------------- paths ---
@@ -117,6 +123,57 @@ function resolveProjectsFile(raw) {
 }
 
 /**
+ * Persist a new ADMIN_PASSWORD to the web/.env file, preserving all other
+ * lines and comments. Returns { persisted, warning } — persisted is false
+ * when a real ADMIN_PASSWORD environment variable overrides the file (the
+ * file is still updated, but a restart would restore the env value).
+ */
+export function updateEnvFilePassword(envFile, newPassword) {
+  const target = envFile || path.join(WEB_DIR, ".env");
+  let raw = "";
+  try {
+    raw = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
+  } catch (err) {
+    throw new Error(`cannot read env file: ${err.message}`);
+  }
+  const lines = String(raw).split(/\r?\n/);
+  let updated = false;
+  const next = lines.map((line) => {
+    if (/^\s*ADMIN_PASSWORD\s*=/.test(line)) {
+      updated = true;
+      return `ADMIN_PASSWORD=${newPassword}`;
+    }
+    return line;
+  });
+  if (!updated) {
+    if (next.length === 1 && next[0] === "") next[0] = `ADMIN_PASSWORD=${newPassword}`;
+    else next.push(`ADMIN_PASSWORD=${newPassword}`);
+  }
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${next.join("\n").replace(/\n+$/, "\n")}`);
+  } catch (err) {
+    throw new Error(`cannot write env file: ${err.message}`);
+  }
+  if (process.env.ADMIN_PASSWORD !== undefined && process.env.ADMIN_PASSWORD !== "") {
+    return {
+      persisted: false,
+      warning: "ADMIN_PASSWORD environment variable overrides web/.env — change applies until restart",
+    };
+  }
+  return { persisted: true };
+}
+
+/** Validate a password change; returns an error message or null when OK. */
+export function validatePasswordChange(currentPassword, newPassword) {
+  if (typeof currentPassword !== "string" || !currentPassword) return "current password is required";
+  if (typeof newPassword !== "string" || !newPassword) return "new password is required";
+  if (newPassword.length < 8) return "new password must be at least 8 characters";
+  if (newPassword === currentPassword) return "new password must be different";
+  return null;
+}
+
+/**
  * Server config: web/.env file values, with real environment variables
  * taking precedence (so containers can override without editing the file).
  */
@@ -138,6 +195,7 @@ export function loadEnvConfig() {
     port: Number.isInteger(port) && port > 0 ? port : 3000,
     projectsFile: resolveProjectsFile(get("PROJECTS_FILE", "web/projects.json")),
     allowedOrigin: get("ALLOWED_ORIGIN", "").trim(),
+    envFile: path.join(WEB_DIR, ".env"),
   };
 }
 
@@ -302,6 +360,280 @@ function compareByHostPort(a, b) {
 
 export function sortSshEntries(entries) {
   return [...entries].sort(compareByHostPort);
+}
+
+// ------------------------------------------------------------ cluster live ---
+
+/** Run kubectl with JSON output and parse it. Throws on kubectl failure. */
+export function kubectlJson(kubectlArgs) {
+  const { cmd, args, opts } = kubectlExec();
+  const out = exec(cmd, [...args, ...kubectlArgs], opts);
+  return JSON.parse(out || "{}");
+}
+
+/**
+ * Parse `kubectl top nodes --no-headers` output.
+ * Each line: NAME CPU(cores) CPU% MEMORY(bytes) MEMORY%.
+ * Returns Map name -> { cpu, cpuPercent, memory, memoryPercent }.
+ */
+export function parseTopNodes(text) {
+  const map = new Map();
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 5) continue;
+    const [name, cpu, cpuPct, memory, memPct] = parts;
+    map.set(name, {
+      cpu,
+      cpuPercent: Number.parseInt(cpuPct, 10),
+      memory,
+      memoryPercent: Number.parseInt(memPct, 10),
+    });
+  }
+  return map;
+}
+
+/**
+ * Parse `kubectl top pods --no-headers` output.
+ * Each line: NAME CPU(cores) MEMORY(bytes).
+ * Returns Map name -> { cpu, memory }.
+ */
+export function parseTopPods(text) {
+  const map = new Map();
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 3) continue;
+    const [name, cpu, memory] = parts;
+    map.set(name, { cpu, memory });
+  }
+  return map;
+}
+
+function nodeReady(node) {
+  const conds = node?.status?.conditions ?? [];
+  const ready = conds.find((c) => c.type === "Ready");
+  return ready?.status === "True";
+}
+
+/** Cluster nodes with capacity + live usage (when metrics-server exists). */
+export function getClusterNodes() {
+  const data = kubectlJson(["get", "nodes", "-o", "json"]);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  let usage = new Map();
+  let metricsAvailable = true;
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "top", "nodes", "--no-headers"], opts);
+    usage = parseTopNodes(out);
+  } catch {
+    metricsAvailable = false;
+  }
+  const nodes = items.map((n) => {
+    const name = n?.metadata?.name ?? "";
+    const live = usage.get(name) ?? null;
+    const pods = (() => {
+      try {
+        const { cmd, args, opts } = kubectlExec();
+        const out = exec(
+          cmd,
+          [...args, "get", "pods", "--all-namespaces", "--field-selector", `spec.nodeName=${name}`, "-o", "json"],
+          opts
+        );
+        return (JSON.parse(out || "{}").items ?? []).length;
+      } catch {
+        return null;
+      }
+    })();
+    return {
+      name,
+      ready: nodeReady(n),
+      cpuCapacity: n?.status?.capacity?.cpu ?? null,
+      cpuAllocatable: n?.status?.allocatable?.cpu ?? null,
+      memoryCapacity: n?.status?.capacity?.memory ?? null,
+      memoryAllocatable: n?.status?.allocatable?.memory ?? null,
+      pods,
+      kubelet: n?.status?.nodeInfo?.kubeletVersion ?? null,
+      osImage: n?.status?.nodeInfo?.osImage ?? null,
+      arch: n?.status?.nodeInfo?.architecture ?? null,
+      createdAt: n?.metadata?.creationTimestamp ?? null,
+      cpu: live?.cpu ?? null,
+      cpuPercent: live?.cpuPercent ?? null,
+      memory: live?.memory ?? null,
+      memoryPercent: live?.memoryPercent ?? null,
+    };
+  });
+  return { nodes, metricsAvailable };
+}
+
+/** Every NodePort allocated cluster-wide (ports in use). */
+export function getClusterPorts() {
+  const data = kubectlJson(["get", "svc", "-A", "-o", "json"]);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const ports = [];
+  for (const svc of items) {
+    const namespace = svc?.metadata?.namespace ?? "";
+    const service = svc?.metadata?.name ?? "";
+    for (const p of svc?.spec?.ports ?? []) {
+      if (p?.nodePort === undefined || p?.nodePort === null) continue;
+      ports.push({
+        namespace,
+        service,
+        name: p.name ?? "",
+        port: p.port ?? null,
+        targetPort: p.targetPort ?? null,
+        nodePort: p.nodePort,
+        protocol: p.protocol ?? "TCP",
+      });
+    }
+  }
+  ports.sort((a, b) => a.nodePort - b.nodePort);
+  return { ports };
+}
+
+/**
+ * Configured ports for one loaded project config (what the dashboard shows
+ * per project even when nothing is deployed yet).
+ */
+export function configuredPorts(cfg) {
+  return {
+    sshNodePort: cfg?.k8s?.nodePort ?? null,
+    sshPort: cfg?.ssh?.port ?? null,
+    web: webPorts(cfg).map((p) => ({
+      name: p.name,
+      port: p.port,
+      hosts: p.hosts,
+      nodePort: p.nodePort ?? null,
+    })),
+    sidecars: sidecarNodePorts(cfg).map((p) => ({
+      name: p.name,
+      port: p.port,
+      nodePort: p.nodePort,
+    })),
+    nodeName: cfg?.k8s?.nodeName || null,
+  };
+}
+
+/**
+ * Live per-project workload status for every registered project.
+ * Never throws for a single project: failures degrade to { deployed: false }.
+ */
+export function getWorkloadsStatus(projects) {
+  const out = [];
+  for (const p of projects ?? []) {
+    const entry = {
+      projectId: p?.id ?? null,
+      name: p?.name ?? "",
+      namespace: null,
+      project: null,
+      deployed: false,
+      ready: null,
+      replicas: null,
+      pods: [],
+      servicePorts: [],
+      configuredPorts: null,
+      resources: null,
+      image: null,
+      nodeName: null,
+      metricsAvailable: true,
+      error: null,
+    };
+    let cfg = null;
+    try {
+      const resolved = resolveStoredConfigPath(p?.configPath);
+      cfg = loadConfig(resolved);
+      entry.namespace = cfg.k8s.namespace;
+      entry.project = cfg.project;
+      entry.configuredPorts = configuredPorts(cfg);
+      entry.resources = cfg.k8s.resources ?? null;
+      entry.nodeName = cfg.k8s.nodeName || null;
+      try {
+        cfg.image.tag = resolveDeployTag(cfg);
+        entry.image = imageRef(cfg);
+      } catch {
+        entry.image = null;
+      }
+    } catch (err) {
+      entry.error = err?.message ?? "cannot load config";
+      out.push(entry);
+      continue;
+    }
+    try {
+      const ns = cfg.k8s.namespace;
+      const name = cfg.project;
+      let deploy = null;
+      try {
+        deploy = kubectlJson(["get", "deployment", name, "-n", ns, "-o", "json"]);
+      } catch {
+        deploy = null;
+      }
+      if (!deploy) {
+        out.push(entry);
+        continue;
+      }
+      entry.deployed = true;
+      entry.replicas = {
+        replicas: deploy?.spec?.replicas ?? null,
+        ready: deploy?.status?.readyReplicas ?? 0,
+        updated: deploy?.status?.updatedReplicas ?? 0,
+        available: deploy?.status?.availableReplicas ?? 0,
+      };
+      entry.ready =
+        (deploy?.status?.readyReplicas ?? 0) > 0 &&
+        (deploy?.status?.readyReplicas ?? 0) >= (deploy?.spec?.replicas ?? 1);
+
+      let podUsage = new Map();
+      try {
+        const { cmd, args, opts } = kubectlExec();
+        const top = exec(
+          cmd,
+          [...args, "top", "pods", "-l", `app=${name}`, "-n", ns, "--no-headers"],
+          opts
+        );
+        podUsage = parseTopPods(top);
+      } catch {
+        entry.metricsAvailable = false;
+      }
+      let pods = [];
+      try {
+        const data = kubectlJson(["get", "pods", "-l", `app=${name}`, "-n", ns, "-o", "json"]);
+        pods = Array.isArray(data?.items) ? data.items : [];
+      } catch {
+        pods = [];
+      }
+      entry.pods = pods.map((pod) => {
+        const podName = pod?.metadata?.name ?? "";
+        const live = podUsage.get(podName) ?? null;
+        const statuses = pod?.status?.containerStatuses ?? [];
+        const restarts = statuses.reduce((sum, s) => sum + (s?.restartCount ?? 0), 0);
+        return {
+          name: podName,
+          phase: pod?.status?.phase ?? null,
+          ready: (statuses.filter((s) => s?.ready).length ?? 0) + "/" + (statuses.length ?? 0),
+          restarts,
+          node: pod?.spec?.nodeName ?? null,
+          cpu: live?.cpu ?? null,
+          memory: live?.memory ?? null,
+          createdAt: pod?.metadata?.creationTimestamp ?? null,
+        };
+      });
+
+      try {
+        const svc = kubectlJson(["get", "svc", name, "-n", ns, "-o", "json"]);
+        entry.servicePorts = (svc?.spec?.ports ?? []).map((sp) => ({
+          name: sp?.name ?? "",
+          port: sp?.port ?? null,
+          targetPort: sp?.targetPort ?? null,
+          nodePort: sp?.nodePort ?? null,
+          protocol: sp?.protocol ?? "TCP",
+        }));
+      } catch {
+        entry.servicePorts = [];
+      }
+    } catch (err) {
+      entry.error = err?.message ?? "cluster query failed";
+    }
+    out.push(entry);
+  }
+  return { workloads: out };
 }
 
 // ---------------------------------------------------------- output capture ---
@@ -561,8 +893,28 @@ function applyCors(req, res, env) {
   return false;
 }
 
-/** Load + validate a project config for the read endpoints. Throws Error. */
-function loadProjectConfig(projectsFile, { projectId, configOverride, projectOverride, tagOverride }) {
+/**
+ * Write content to a uniquely-named temp file next to `realPath`, so relative
+ * config paths (dockerfile/context/keyDir) resolve exactly as they would for
+ * the real file. Callers must delete the temp file when done.
+ */
+function writeSiblingTemp(realPath, content, prefix) {
+  const dir = path.dirname(path.resolve(realPath));
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${prefix}-${crypto.randomBytes(8).toString("hex")}.yaml`);
+  fs.writeFileSync(tmp, content);
+  return tmp;
+}
+
+/**
+ * Load + validate a project config for the read endpoints. Throws Error.
+ *
+ * `yamlOverride` / `globalYamlOverride` validate unsaved editor drafts
+ * without touching the real files on disk: each draft is written to a hidden
+ * temp sibling file and removed via the returned `cleanup()` (also run
+ * automatically when loading itself throws).
+ */
+function loadProjectConfig(projectsFile, { projectId, configOverride, projectOverride, tagOverride, yamlOverride, globalYamlOverride }) {
   let configPath = configOverride ? String(configOverride) : null;
   if (projectId) {
     const project = findProject(projectsFile, projectId);
@@ -575,11 +927,68 @@ function loadProjectConfig(projectsFile, { projectId, configOverride, projectOve
   }
   if (!configPath) throw Object.assign(new Error("projectId or configOverride is required"), { code: "BAD_REQUEST" });
   const resolved = resolveStoredConfigPath(configPath);
+  const temps = [];
+  const cleanup = () => {
+    for (const tmp of temps) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+  let effectivePath = resolved;
+  if (yamlOverride !== undefined) {
+    if (typeof yamlOverride !== "string" || !yamlOverride.trim()) {
+      throw Object.assign(new Error("config draft is empty"), { code: "BAD_REQUEST" });
+    }
+    effectivePath = writeSiblingTemp(resolved, yamlOverride, "gui-project-draft");
+    temps.push(effectivePath);
+  }
+  const loadOpts = {};
+  if (globalYamlOverride !== undefined) {
+    if (typeof globalYamlOverride !== "string" || !globalYamlOverride.trim()) {
+      cleanup();
+      throw Object.assign(new Error("global config draft is empty"), { code: "BAD_REQUEST" });
+    }
+    const tmpGlobal = writeSiblingTemp(globalConfigPath(), globalYamlOverride, "gui-global-draft");
+    temps.push(tmpGlobal);
+    loadOpts.globalConfigPath = tmpGlobal;
+  }
   const overrides = {};
   if (projectOverride) overrides.project = projectOverride;
   if (tagOverride) overrides.image = { tag: tagOverride };
-  const cfg = loadConfig(resolved, overrides);
-  return { cfg, configPath: resolved };
+  let cfg;
+  try {
+    cfg = loadConfig(effectivePath, overrides, loadOpts);
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
+  return { cfg, configPath: resolved, cleanup };
+}
+
+/** Read validate/manifest params from the query string (GET, saved files) or
+ *  the JSON body (POST, unsaved editor drafts). Throws on a bad body. */
+async function readValidateParams(req, url) {
+  if ((req.method ?? "GET").toUpperCase() === "GET") {
+    return {
+      projectId: url.searchParams.get("projectId"),
+      tagOverride: url.searchParams.get("tagOverride"),
+    };
+  }
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    throw Object.assign(new Error(err.message), { code: "BAD_REQUEST" });
+  }
+  return {
+    projectId: body?.projectId ?? null,
+    tagOverride: body?.tagOverride ?? null,
+    yamlOverride: body?.yaml,
+    globalYamlOverride: body?.globalYaml,
+  };
 }
 
 // ------------------------------------------------------------------ router ---
@@ -678,6 +1087,39 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     sendJson(res, 200, { ok: true }, { "Set-Cookie": sessionCookieHeader("", 0) });
     return;
   }
+  if (method === "POST" && pathname === "/api/change-password") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      sendJson(res, 400, { error: err.message });
+      return;
+    }
+    const { currentPassword, newPassword } = body ?? {};
+    const invalid = validatePasswordChange(currentPassword, newPassword);
+    if (invalid) {
+      sendJson(res, 400, { error: invalid });
+      return;
+    }
+    if (currentPassword !== env.adminPassword) {
+      sendJson(res, 401, { error: "current password is incorrect" });
+      return;
+    }
+    env.adminPassword = newPassword;
+    let persist;
+    try {
+      persist = updateEnvFilePassword(env.envFile, newPassword);
+    } catch (err) {
+      sendJson(res, 500, { error: err.message });
+      return;
+    }
+    // Keep only this session: a password change logs out other browsers.
+    for (const [token, sess] of sessions) {
+      if (sess.email === session.email && token !== session.token) sessions.delete(token);
+    }
+    sendJson(res, 200, { ok: true, persisted: persist.persisted, ...(persist.warning ? { warning: persist.warning } : {}) });
+    return;
+  }
 
   // ------------------------------------------------------- projects CRUD ---
   if (pathname === "/api/projects") {
@@ -719,22 +1161,74 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     return;
   }
 
-  const projectDelete = pathname.match(/^\/api\/projects\/([^/]+)$/);
-  if (projectDelete) {
-    if (method !== "DELETE") {
-      sendJson(res, 405, { error: "method not allowed" });
+  const projectById = pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectById) {
+    const id = decodeURIComponent(projectById[1]);
+    if (method === "GET") {
+      const project = findProject(projectsFile, id);
+      if (!project) {
+        sendJson(res, 404, { error: `unknown project: ${id}` });
+        return;
+      }
+      sendJson(res, 200, { project });
       return;
     }
-    const id = decodeURIComponent(projectDelete[1]);
-    const projects = readProjects(projectsFile);
-    const idx = projects.findIndex((p) => p.id === id);
-    if (idx === -1) {
-      sendJson(res, 404, { error: `unknown project: ${id}` });
+    if (method === "PUT") {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        sendJson(res, 400, { error: err.message });
+        return;
+      }
+      const projects = readProjects(projectsFile);
+      const idx = projects.findIndex((p) => p.id === id);
+      if (idx === -1) {
+        sendJson(res, 404, { error: `unknown project: ${id}` });
+        return;
+      }
+      const hasName = body?.name !== undefined;
+      const hasConfigPath = body?.configPath !== undefined;
+      if (!hasName && !hasConfigPath) {
+        sendJson(res, 400, { error: "name or configPath is required" });
+        return;
+      }
+      if (hasName) {
+        const name = String(body.name ?? "").trim();
+        if (!name) {
+          sendJson(res, 400, { error: "name must not be empty" });
+          return;
+        }
+        projects[idx].name = name;
+      }
+      if (hasConfigPath) {
+        const rawConfigPath = String(body.configPath ?? "").trim();
+        if (!rawConfigPath) {
+          sendJson(res, 400, { error: "configPath must not be empty" });
+          return;
+        }
+        // Store the resolved absolute path so the UI and jobs always
+        // operate on the same file. The file itself may not exist yet —
+        // the user can create it via the Edit page textarea.
+        projects[idx].configPath = resolveStoredConfigPath(rawConfigPath);
+      }
+      writeProjects(projectsFile, projects);
+      sendJson(res, 200, { project: projects[idx] });
       return;
     }
-    projects.splice(idx, 1);
-    writeProjects(projectsFile, projects);
-    sendJson(res, 200, { ok: true });
+    if (method === "DELETE") {
+      const projects = readProjects(projectsFile);
+      const idx = projects.findIndex((p) => p.id === id);
+      if (idx === -1) {
+        sendJson(res, 404, { error: `unknown project: ${id}` });
+        return;
+      }
+      projects.splice(idx, 1);
+      writeProjects(projectsFile, projects);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    sendJson(res, 405, { error: "method not allowed" });
     return;
   }
 
@@ -806,12 +1300,13 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
         /* ignore */
       }
       try {
+        fs.mkdirSync(path.dirname(project.configPath), { recursive: true });
         fs.writeFileSync(project.configPath, body.yaml);
       } catch (err) {
         sendJson(res, 500, { error: `cannot write config file: ${err.message}` });
         return;
       }
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, configPath: project.configPath });
       return;
     }
     sendJson(res, 405, { error: "method not allowed" });
@@ -862,44 +1357,59 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     return;
   }
 
-  // ------------------------------------------------------------- validate ---
-  if (method === "GET" && pathname === "/api/validate") {
-    let cfg;
+  // --------------------------------------- validate (+ draft via POST) ---
+  // GET validates the saved files; POST accepts { projectId, tagOverride,
+  // yaml?, globalYaml? } and validates the unsaved editor drafts instead,
+  // via temp sibling files that never touch the real files on disk.
+  if ((method === "GET" || method === "POST") && pathname === "/api/validate") {
+    let params;
     try {
-      ({ cfg } = loadProjectConfig(projectsFile, {
-        projectId: url.searchParams.get("projectId"),
-        tagOverride: url.searchParams.get("tagOverride"),
-      }));
+      params = await readValidateParams(req, url);
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: err.message, lines: [] });
+      return;
+    }
+    let loaded;
+    try {
+      loaded = loadProjectConfig(projectsFile, params);
     } catch (err) {
       sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, { ok: false, error: err.message, lines: [] });
       return;
     }
     try {
-      const { lines } = captureOutput(() => validate(cfg, { manifest: false }));
+      const { lines } = captureOutput(() => validate(loaded.cfg, { manifest: false }));
       sendJson(res, 200, { ok: true, lines, summary: lines.join("\n") });
     } catch (err) {
       sendJson(res, 200, { ok: false, error: err.message, lines: [], summary: "" });
+    } finally {
+      loaded.cleanup();
     }
     return;
   }
 
-  // ------------------------------------------------------------- manifest ---
-  if (method === "GET" && pathname === "/api/manifest") {
-    let cfg;
+  // --------------------------------------- manifest (+ draft via POST) ---
+  if ((method === "GET" || method === "POST") && pathname === "/api/manifest") {
+    let params;
     try {
-      ({ cfg } = loadProjectConfig(projectsFile, {
-        projectId: url.searchParams.get("projectId"),
-        tagOverride: url.searchParams.get("tagOverride"),
-      }));
+      params = await readValidateParams(req, url);
+    } catch (err) {
+      sendJson(res, 400, { error: err.message });
+      return;
+    }
+    let loaded;
+    try {
+      loaded = loadProjectConfig(projectsFile, params);
     } catch (err) {
       sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, { error: err.message });
       return;
     }
     try {
-      const { lines, stdout } = captureOutput(() => validate(cfg, { manifest: true }));
+      const { lines, stdout } = captureOutput(() => validate(loaded.cfg, { manifest: true }));
       sendJson(res, 200, { manifest: stdout, warnings: lines });
     } catch (err) {
       sendJson(res, 400, { error: err.message });
+    } finally {
+      loaded.cleanup();
     }
     return;
   }
@@ -962,12 +1472,19 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
   }
 
   // ---------------------------------------------------------- system state ---
+  // System image is global: projectId is optional. Without it the repo-root
+  // default config is used (same as `coding-container system ...` with no -c).
   if (method === "GET" && pathname === "/api/system/state") {
     let cfg;
+    const stateProjectId = url.searchParams.get("projectId");
     try {
-      ({ cfg } = loadProjectConfig(projectsFile, {
-        projectId: url.searchParams.get("projectId"),
-      }));
+      if (stateProjectId) {
+        ({ cfg } = loadProjectConfig(projectsFile, {
+          projectId: stateProjectId,
+        }));
+      } else {
+        cfg = loadConfig(path.join(REPO_ROOT, "config.yaml"));
+      }
     } catch (err) {
       sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, { ok: false, error: err.message });
       return;
@@ -992,12 +1509,18 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
   }
 
   // ----------------------------------------------------------- system tags ---
+  // Same project-optional rule as /api/system/state above.
   if (method === "GET" && pathname === "/api/system/tags") {
     let cfg;
+    const tagsProjectId = url.searchParams.get("projectId");
     try {
-      ({ cfg } = loadProjectConfig(projectsFile, {
-        projectId: url.searchParams.get("projectId"),
-      }));
+      if (tagsProjectId) {
+        ({ cfg } = loadProjectConfig(projectsFile, {
+          projectId: tagsProjectId,
+        }));
+      } else {
+        cfg = loadConfig(path.join(REPO_ROOT, "config.yaml"));
+      }
     } catch (err) {
       sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, { error: err.message });
       return;
@@ -1012,6 +1535,40 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
         return;
       }
       sendJson(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  // ------------------------------------------------------- cluster live ---
+  // Read-only live cluster state for the dashboard. Failures degrade to
+  // { ok: false, error } so the UI can render config data without the
+  // cluster (e.g. metrics-server missing, kubectl offline).
+  if (method === "GET" && pathname === "/api/cluster/nodes") {
+    try {
+      const { nodes, metricsAvailable } = getClusterNodes();
+      sendJson(res, 200, { ok: true, nodes, metricsAvailable });
+    } catch (err) {
+      sendJson(res, 200, { ok: false, nodes: [], metricsAvailable: false, error: err.message });
+    }
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cluster/ports") {
+    try {
+      const { ports } = getClusterPorts();
+      sendJson(res, 200, { ok: true, ports });
+    } catch (err) {
+      sendJson(res, 200, { ok: false, ports: [], error: err.message });
+    }
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cluster/workloads") {
+    try {
+      const { workloads } = getWorkloadsStatus(readProjects(projectsFile));
+      sendJson(res, 200, { ok: true, workloads });
+    } catch (err) {
+      sendJson(res, 200, { ok: false, workloads: [], error: err.message });
     }
     return;
   }
@@ -1046,7 +1603,17 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       sendJson(res, 400, { error: `unknown op: ${op} (allowed: ${ALLOWED_OPS.join(", ")})` });
       return;
     }
-    const needsProject = op !== "setup" && op !== "list-update";
+    // System image ops are global (like setup/list-update): they run against
+    // the repo-root default config when no projectId is given, exactly like
+    // `coding-container system ...` with no -c flag.
+    const SYSTEM_NO_PROJECT_OPS = new Set([
+      "system-init",
+      "system-create",
+      "system-rollback",
+      "system-gc",
+    ]);
+    const needsProject =
+      op !== "setup" && op !== "list-update" && !SYSTEM_NO_PROJECT_OPS.has(op);
     let project = null;
     if (projectId) {
       project = findProject(projectsFile, projectId);
