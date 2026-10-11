@@ -29,18 +29,20 @@ export const NAV_ENTRIES: NavEntry[] = [
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
+  showSetup?: boolean;
 }
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, showSetup = false }: SidebarProps) {
   const location = useLocation();
   const isActiveEntry = (to: string) =>
     to === '/' ? location.pathname === '/' : location.pathname === to || location.pathname.startsWith(`${to}/`);
+  const visibleEntries = NAV_ENTRIES.filter((entry) => entry.to !== '/setup' || showSetup);
   return (
     <>
       {open && <div className="drawer-scrim" aria-hidden="true" onClick={onClose} data-ref="sidebar-scrim" />}
       <aside className={`app-sidebar ${open ? 'app-sidebar-open' : ''}`} aria-label="Primary" data-ref="app-sidebar">
         <nav className="nav-list" aria-label="Admin sections" data-ref="sidebar-nav">
-          {NAV_ENTRIES.map(({ to, label, icon: Icon }) => {
+          {visibleEntries.map(({ to, label, icon: Icon }) => {
             const active = isActiveEntry(to);
             return (
               <NavLink

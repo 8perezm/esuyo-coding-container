@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronUp, LogOut, PencilLine, UserRound } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
-import { EditProfileModal } from './EditProfileModal';
 
 type MenuId = 'edit' | 'logout';
 
@@ -15,7 +14,6 @@ export function ProfileBlock() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -43,7 +41,7 @@ export function ProfileBlock() {
   const runAction = async (id: MenuId) => {
     setOpen(false);
     if (id === 'edit') {
-      setEditOpen(true);
+      navigate('/profile');
     } else {
       await logout();
       navigate('/login', { replace: true });
@@ -154,7 +152,6 @@ export function ProfileBlock() {
         <ChevronUp size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
       </button>
 
-      {editOpen && <EditProfileModal onClose={() => setEditOpen(false)} />}
     </div>
   );
 }

@@ -4,12 +4,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { expandEnvMap } from "./utils/envsubst.js";
+import { configDirLeaf, defaultNamespace } from "./utils/instance.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 /**
- * Global config directory: $XDG_CONFIG_HOME/coding-container or ~/.config/coding-container.
+ * Global config directory: $XDG_CONFIG_HOME/<leaf> or ~/.config/<leaf>.
+ * Leaf defaults to "coding-container" (CODING_CONFIG_LEAF in
+ * PROJECT_FOLDER/.env or the environment overrides it), so repeated
+ * checkouts (dev vs prod) get separate config.yaml/Dockerfile/keys folders.
  * Holds the shared settings (config.yaml) and, by default, the SSH key
  * material (keys/).
  */
@@ -17,7 +21,7 @@ export function globalConfigDir() {
   const base = process.env.XDG_CONFIG_HOME
     ? path.resolve(process.env.XDG_CONFIG_HOME)
     : path.join(os.homedir(), ".config");
-  return path.join(base, "coding-container");
+  return path.join(base, configDirLeaf());
 }
 
 export function globalConfigPath() {
@@ -215,7 +219,11 @@ export function loadConfig(configPath, overrides = {}, opts = {}) {
   const gPath = opts.globalConfigPath ? path.resolve(opts.globalConfigPath) : globalConfigPath();
   const gDir = path.dirname(gPath);
 
-  let cfg = withPaths(DEFAULTS, localDir);
+  // Instance default namespace (CODING_NAMESPACE): base layer only, so the
+  // global/project configs still override it per project.
+  const baseDefaults = structuredClone(DEFAULTS);
+  baseDefaults.k8s.namespace = defaultNamespace();
+  let cfg = withPaths(baseDefaults, localDir);
   if (fs.existsSync(gPath)) {
     cfg = deepMerge(cfg, withPaths(readYaml(gPath), gDir));
   }

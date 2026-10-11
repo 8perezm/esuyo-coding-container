@@ -27,6 +27,13 @@ interface ConfigResponse {
   configPath?: string;
 }
 
+interface StarterResponse {
+  yaml: string;
+  slug: string;
+  mainNodePort: number;
+  dbNodePort: number;
+}
+
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : 'Request failed';
 }
@@ -51,6 +58,7 @@ export function ProjectEditPage() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [configOk, setConfigOk] = useState<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [starterPending, setStarterPending] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -90,11 +98,15 @@ export function ProjectEditPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        // Missing/unreadable file: let the user create it via the textarea.
+        // No file yet is the expected empty state (not an error): the
+        // "saving below will create it" note already covers it.
+        const msg = errMsg(err);
         setYaml('');
         setResolvedPath(project.configPath);
         setConfigMissing(true);
-        setConfigError(`Could not read config file (${errMsg(err)}). You can create it below.`);
+        if (!/config file not found|cannot read config file|ENOENT|no such file/i.test(msg)) {
+          setConfigError(`Could not load config (${msg}).`);
+        }
       });
     return () => {
       cancelled = true;
@@ -147,11 +159,58 @@ export function ProjectEditPage() {
       });
       setConfigMissing(false);
       if (res.configPath) setResolvedPath(res.configPath);
-      setConfigOk(`Config file saved to disk${res.configPath ? `: ${res.configPath}` : '.'}`);
+      navigate('/projects');
     } catch (err) {
       setConfigError(errMsg(err));
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const fetchStarter = async () => {
+    if (!project) throw new Error('Missing project');
+    return api.get<StarterResponse>(`/api/project-starter?projectId=${encodeURIComponent(project.id)}`);
+  };
+
+  const onFillStarter = async () => {
+    if (!project || starterPending) return;
+    if (yaml.trim() && !window.confirm('Replace the editor content with the starter example? Unsaved changes will be lost.')) {
+      return;
+    }
+    setConfigError(null);
+    setConfigOk(null);
+    setStarterPending(true);
+    try {
+      const starter = await fetchStarter();
+      setYaml(starter.yaml);
+      setConfigMissing(false);
+      setConfigOk('Starter example loaded — review hosts and passwords, then Save config file.');
+    } catch (err) {
+      setConfigError(errMsg(err));
+    } finally {
+      setStarterPending(false);
+    }
+  };
+
+  const onDownloadStarter = async () => {
+    if (!project || starterPending) return;
+    setConfigError(null);
+    setStarterPending(true);
+    try {
+      const starter = await fetchStarter();
+      const blob = new Blob([starter.yaml], { type: 'text/yaml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${starter.slug || project.name}-config.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setConfigError(errMsg(err));
+    } finally {
+      setStarterPending(false);
     }
   };
 
@@ -203,6 +262,14 @@ export function ProjectEditPage() {
           <>
             <Link to="/projects" className="btn btn-secondary" data-ref="page-project-edit-back">
               Back to projects
+            </Link>
+            <Link
+              to={`/projects/${encodeURIComponent(project.id)}/ssh`}
+              className="btn btn-secondary"
+              data-ref="page-project-edit-terminal"
+              aria-label={`Open terminal for ${project.name}`}
+            >
+              Terminal
             </Link>
             <Button variant="secondary" onClick={() => navigate('/projects')} data-ref="page-project-edit-done">
               Done
@@ -276,6 +343,9 @@ export function ProjectEditPage() {
                   style={{ width: '100%' }}
                   data-ref="page-project-edit-input-config-path"
                 />
+                <p style={{ margin: '8px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }} data-ref="page-project-edit-config-path-hint">
+                  Renaming moves the file when it lives in the managed system folder. Custom paths stay put.
+                </p>
               </div>
               <div>
                 <Button type="submit" disabled={savingSettings} data-ref="page-project-edit-settings-save">
@@ -316,6 +386,14 @@ export function ProjectEditPage() {
               </p>
             )}
             <div style={{ display: 'grid', gap: 12 }} data-ref="page-project-edit-config-form">
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }} data-ref="page-project-edit-starter-actions">
+                <Button variant="secondary" onClick={() => void onFillStarter()} disabled={starterPending} data-ref="page-project-edit-config-fill">
+                  {starterPending ? 'Loading…' : 'Fill with example'}
+                </Button>
+                <Button variant="secondary" onClick={() => void onDownloadStarter()} disabled={starterPending} data-ref="page-project-edit-config-download">
+                  Download example
+                </Button>
+              </div>
               <div>
                 <Label htmlFor="edit-project-yaml">Config (YAML)</Label>
                 <Suspense fallback={<Spinner label="Loading editor…" />}>

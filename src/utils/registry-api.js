@@ -186,7 +186,7 @@ async function send(cfg, method, path, authHeader, extraHeaders = {}) {
  * Authorization header, and on 401 follow the WWW-Authenticate challenge
  * (Bearer token exchange or plain Basic) with the local docker credentials.
  */
-async function apiRequest(cfg, method, path, extraHeaders = {}) {
+async function apiRequest(cfg, method, path, extraHeaders = {}, scopeOverride = null) {
   let res = await send(cfg, method, path, state.authHeader, extraHeaders);
   if (res.status !== 401) return res;
 
@@ -214,7 +214,7 @@ async function apiRequest(cfg, method, path, extraHeaders = {}) {
     authHeader = basic;
   } else if (challenge.type === "bearer") {
     const repo = registryRepoName(cfg);
-    const scope = challenge.scope || `repository:${repo}:pull,push`;
+    const scope = scopeOverride || challenge.scope || `repository:${repo}:pull,push`;
     const key = `${challenge.realm}|${challenge.service || ""}|${scope}`;
     let token = state.tokens.get(key);
     if (!token) {
@@ -287,12 +287,67 @@ export async function listTags(cfg) {
 }
 
 /**
- * Delete one tag. Returns normally on success (2xx); throws otherwise.
+ * Delete one tag. Uses the standard Registry V2 / OCI flow:
+ *   GET /v2/<repo>/manifests/<tag> (with a manifest Accept header) to
+ *   resolve the Docker-Content-Digest, then
+ *   DELETE /v2/<repo>/manifests/<digest>.
+ * Gitea/Forgejo also accepts DELETE .../manifests/<tag> directly, so when
+ * the digest lookup fails we fall back to deleting by tag reference.
+ * Returns normally on success (2xx); throws otherwise.
  */
 export async function deleteTag(cfg, tag) {
   const repo = registryRepoName(cfg);
   const host = registryHost(cfg.image.registry);
-  const res = await apiRequest(cfg, "DELETE", `/v2/${repo}/tags/${encodeURIComponent(tag)}`);
+  const ref = encodeURIComponent(tag);
+  const deleteScope = `repository:${repo}:pull,push,delete`;
+  const manifestAccept = [
+    "application/vnd.docker.distribution.manifest.v2+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.oci.image.index.v1+json",
+  ].join(", ");
+
+  // Resolve the manifest digest for the tag. A 404 here means the tag is
+  // already gone.
+  const manifestRes = await apiRequest(
+    cfg,
+    "GET",
+    `/v2/${repo}/manifests/${ref}`,
+    { Accept: manifestAccept },
+    deleteScope
+  );
+  let digest = manifestRes.headers.get("docker-content-digest");
+  if (manifestRes.status === 404) {
+    throw new Error(`tag ${tag} not found (already deleted?)`);
+  }
+  if (!manifestRes.ok || !digest) {
+    // Registry did not return a digest (e.g. it rejects GET manifests by
+    // tag): try deleting the tag reference directly (Gitea supports
+    // DELETE .../manifests/<tag>).
+    const direct = await apiRequest(
+      cfg,
+      "DELETE",
+      `/v2/${repo}/manifests/${ref}`,
+      {},
+      deleteScope
+    );
+    if (direct.status === 404) {
+      throw new Error(`tag ${tag} not found (already deleted?)`);
+    }
+    if (direct.status === 405) {
+      throw new Error(
+        `registry ${host} does not support deleting tags through the registry API (405) — ` +
+          `e.g. AWS ECR requires the AWS BatchDeleteImage API instead`
+      );
+    }
+    if (!direct.ok) {
+      throw new Error(`deleting tag ${tag} failed with ${direct.status} ${direct.statusText}`.trim());
+    }
+    return;
+  }
+
+  digest = digest.trim();
+  const res = await apiRequest(cfg, "DELETE", `/v2/${repo}/manifests/${digest}`, {}, deleteScope);
   if (res.status === 404) {
     throw new Error(`tag ${tag} not found (already deleted?)`);
   }

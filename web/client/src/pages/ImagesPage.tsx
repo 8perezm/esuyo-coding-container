@@ -73,6 +73,12 @@ interface JobResponse {
   startedAt?: string;
 }
 
+interface GlobalConfigResponse {
+  exists: boolean;
+  path: string;
+  dockerfile?: { path: string; exists: boolean };
+}
+
 interface JobDetail {
   id: string;
   op: string;
@@ -134,6 +140,28 @@ function useSystemState(projectId: string | null, refreshTick = 0) {
   return { state, image, warning, error, loading };
 }
 
+function useGlobalDockerfile() {
+  const [dockerfile, setDockerfile] = useState<{ path: string; exists: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<GlobalConfigResponse>('/api/global-config')
+      .then((data) => {
+        if (cancelled) return;
+        setDockerfile(data.dockerfile ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDockerfile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return dockerfile;
+}
+
 function useJobDetail(jobId: string | null) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -177,12 +205,16 @@ function StateCard({
   warning,
   state,
   image,
+  dockerfile,
+  showDockerfile,
 }: {
   loading: boolean;
   error: string | null;
   warning: string | null;
   state: SystemState | null;
   image: string | null;
+  dockerfile: { path: string; exists: boolean } | null;
+  showDockerfile: boolean;
 }) {
   if (loading) {
     return (
@@ -239,6 +271,15 @@ function StateCard({
         <p data-ref="page-images-state-image" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', wordBreak: 'break-all' }}>
           <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Resolved image: </span>
           <code data-ref="page-images-state-image-code" style={monoStyle}>{image}</code>
+        </p>
+      ) : null}
+      {showDockerfile && dockerfile ? (
+        <p data-ref="page-images-state-dockerfile" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', wordBreak: 'break-all' }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>System Dockerfile: </span>
+          <code data-ref="page-images-state-dockerfile-code" style={monoStyle}>{dockerfile.path}</code>
+          {!dockerfile.exists ? (
+            <span data-ref="page-images-state-dockerfile-missing" style={{ color: 'var(--color-error, #b3261e)' }}> (missing — run setup to create it)</span>
+          ) : null}
         </p>
       ) : null}
     </Card>
@@ -438,6 +479,7 @@ export function ImagesPage() {
   const [useProjectOverride, setUseProjectOverride] = useState(false);
   const effectiveProjectId = useProjectOverride ? (active?.id ?? null) : null;
   const sys = useSystemState(effectiveProjectId, refreshTick);
+  const globalDockerfile = useGlobalDockerfile();
 
   const [publishTag, setPublishTag] = useState('');
   const [rollbackTag, setRollbackTag] = useState('');
@@ -546,6 +588,8 @@ export function ImagesPage() {
               warning={sys.warning}
               state={sys.state}
               image={sys.image}
+              dockerfile={globalDockerfile}
+              showDockerfile={!useProjectOverride}
             />
           </section>
 
@@ -650,7 +694,9 @@ export function ImagesPage() {
                     id="images-gc-keep"
                     value={gcKeep}
                     onChange={(e) => setGcKeep(e.target.value)}
-                    placeholder="server default when empty"
+                    placeholder={
+                      sys.state ? `server default ${sys.state.keep} when empty` : 'server default when empty'
+                    }
                     inputMode="numeric"
                     autoComplete="off"
                   />

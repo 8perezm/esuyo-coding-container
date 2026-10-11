@@ -88,6 +88,12 @@ describe('ImagesPage contract', () => {
     assert.match(images, /[Cc]ustom-mode/);
     assert.match(images, /refus/);
   });
+
+  it('shows the global system Dockerfile in the state card when no project override is used', () => {
+    assert.match(images, /\/api\/global-config/);
+    assert.ok(images.includes('page-images-state-dockerfile'), 'missing dockerfile line in state card');
+    assert.ok(images.includes('System Dockerfile'), 'missing dockerfile label');
+  });
 });
 
 describe('SystemPage contract', () => {

@@ -4,3 +4,8 @@ keys/
 *.pem
 test/fixtures.local.mjs
 config.local.yaml
+.env
+.playwright-mcp/
+*.log
+coverage/
+.DS_Store

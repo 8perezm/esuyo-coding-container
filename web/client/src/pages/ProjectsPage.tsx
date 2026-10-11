@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Pencil, Plus, Rocket, Trash2, Wrench } from 'lucide-react';
+import { Pencil, Plus, Rocket, SquareTerminal, Trash2, Upload, Wrench } from 'lucide-react';
 import { api } from '../lib/api';
 import { useProjects } from '../lib/projects';
 import type { Project } from '../lib/projects';
@@ -37,6 +37,7 @@ interface ConfigResponse {
 interface WorkloadStatus {
   projectId?: string | null;
   deployed: boolean;
+  image?: string | null;
 }
 
 interface WorkloadsResponse {
@@ -66,6 +67,7 @@ export function ProjectsPage() {
   const [jobNotices, setJobNotices] = useState<Record<string, JobResponse>>({});
   const [jobPendingKey, setJobPendingKey] = useState<string | null>(null);
   const [deployedIds, setDeployedIds] = useState<Set<string> | null>(null);
+  const [workloadImages, setWorkloadImages] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -73,9 +75,15 @@ export function ProjectsPage() {
       .get<WorkloadsResponse>('/api/cluster/workloads')
       .then((data) => {
         if (cancelled) return;
+        const workloads = data.workloads ?? [];
         setDeployedIds(
-          new Set((data.workloads ?? []).filter((w) => w.deployed && w.projectId).map((w) => w.projectId as string)),
+          new Set(workloads.filter((w) => w.deployed && w.projectId).map((w) => w.projectId as string)),
         );
+        const images: Record<string, string> = {};
+        for (const w of workloads) {
+          if (w.projectId && w.image) images[w.projectId] = w.image;
+        }
+        setWorkloadImages(images);
       })
       .catch(() => {
         if (!cancelled) setDeployedIds(new Set());
@@ -156,10 +164,12 @@ export function ProjectsPage() {
     const config = configs[p.id] ?? null;
     const image = config?.merged.image;
     const k8s = config?.merged.k8s;
-    const mode = config?.imageMode ?? config?.merged.imageMode;
     const imageText = config
       ? `${[image?.registry, image?.name].filter(Boolean).join('/') || '—'}${image?.tag ? `:${image.tag}` : ''}`
       : '…';
+    // Prefer the cluster-resolved image (registry/name:tag) from workloads —
+    // saved configs often leave the tag floating on the cluster.
+    const imageDisplay = workloadImages[p.id] ?? imageText;
     const notice = jobNotices[p.id] ?? null;
     return (
       <TR key={p.id}>
@@ -172,14 +182,14 @@ export function ProjectsPage() {
             {isDeployed ? <Badge tone="accent">Deployed</Badge> : <Badge>Stopped</Badge>}
           </span>
         </TD>
-        <TD>{config ? <Badge tone={mode === 'global' ? 'violet' : 'default'}>{mode ?? '—'}</Badge> : '…'}</TD>
-        <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-md)' }}>{imageText}</TD>
+        <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-md)' }}>{imageDisplay}</TD>
         <TD>{config ? (k8s?.namespace ?? '—') : '…'}</TD>
         <TD>{config ? (k8s?.nodePort ?? '—') : '…'}</TD>
         <TD>
           <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
             {!isDeployed && (
               <Button
+                variant="secondary"
                 onClick={() => void startJob('create', p)}
                 disabled={isRowBusy(p.id)}
                 data-ref="page-projects-row-create"
@@ -190,6 +200,7 @@ export function ProjectsPage() {
               </Button>
             )}
             <Button
+              variant="secondary"
               onClick={() => void startJob('deploy', p)}
               disabled={isRowBusy(p.id)}
               data-ref="page-projects-row-deploy"
@@ -206,6 +217,16 @@ export function ProjectsPage() {
               <Pencil size={16} aria-hidden="true" /> Edit
             </Link>
             {isDeployed && (
+              <Link
+                to={`/projects/${encodeURIComponent(p.id)}/ssh`}
+                className="btn btn-secondary"
+                aria-label={`Open terminal for ${p.name}`}
+                data-ref="page-projects-row-ssh"
+              >
+                <SquareTerminal size={16} aria-hidden="true" /> Terminal
+              </Link>
+            )}
+            {isDeployed && (
               <Button
                 variant="secondary"
                 onClick={() => setWorkloadsDeleteTarget(p)}
@@ -213,8 +234,8 @@ export function ProjectsPage() {
                 aria-label={`Delete workloads for ${p.name}`}
                 data-ref="page-projects-row-workloads-delete"
               >
-                <Trash2 size={16} aria-hidden="true" />{' '}
-                {isPending(p.id, 'delete') ? 'Starting…' : 'Delete'}
+                <Trash2 size={16} aria-hidden="true" />
+                {isPending(p.id, 'delete') ? ' Starting…' : null}
               </Button>
             )}
           </span>
@@ -238,7 +259,6 @@ export function ProjectsPage() {
         <THead>
           <TR>
             <TH>Name</TH>
-            <TH>Mode</TH>
             <TH>Image</TH>
             <TH>Namespace</TH>
             <TH>NodePort</TH>
@@ -256,9 +276,14 @@ export function ProjectsPage() {
         title="Projects"
         description="Per-project containers, workspaces, and lifecycle actions."
         actions={
-          <Link to="/projects/new" className="btn btn-primary" data-ref="page-projects-action-add">
-            <Plus size={16} aria-hidden="true" /> Add project
-          </Link>
+          <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link to="/projects/import" className="btn btn-secondary" data-ref="page-projects-action-import">
+              <Upload size={16} aria-hidden="true" /> Import project
+            </Link>
+            <Link to="/projects/new" className="btn btn-primary" data-ref="page-projects-action-add">
+              <Plus size={16} aria-hidden="true" /> Add project
+            </Link>
+          </span>
         }
       />
 
@@ -279,9 +304,14 @@ export function ProjectsPage() {
             title="No projects yet"
             description="Add your first project — point it at a config file on the server."
             action={
-              <Link to="/projects/new" className="btn btn-primary" data-ref="page-projects-empty-add">
-                <Plus size={16} aria-hidden="true" /> Add project
-              </Link>
+              <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                <Link to="/projects/import" className="btn btn-secondary" data-ref="page-projects-empty-import">
+                  <Upload size={16} aria-hidden="true" /> Import project
+                </Link>
+                <Link to="/projects/new" className="btn btn-primary" data-ref="page-projects-empty-add">
+                  <Plus size={16} aria-hidden="true" /> Add project
+                </Link>
+              </span>
             }
           />
         </div>

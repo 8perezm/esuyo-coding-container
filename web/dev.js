@@ -2,7 +2,7 @@
 /**
  * GUI dev launcher: runs the backend API and the Vite frontend together.
  *
- *   npm run dev          # backend (:3001, from web/.env PORT) + Vite (:3000)
+ *   npm run dev          # backend (:3001, from .env PORT) + Vite (:3000)
  *   npm run dev:kill     # kill orphaned dev servers still holding those ports
  *
  * Zero dependencies (node: builtins only). `npm --prefix` is not used so the
@@ -17,12 +17,13 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB_DIR = path.join(REPO_ROOT, "web");
-const ENV_PATH = path.join(WEB_DIR, ".env");
+const ENV_PATH = path.join(REPO_ROOT, ".env");
+const LEGACY_ENV_PATH = path.join(WEB_DIR, ".env");
 const CLIENT_DIR = path.join(WEB_DIR, "client");
 
-if (!fs.existsSync(ENV_PATH)) {
+if (!fs.existsSync(ENV_PATH) && !fs.existsSync(LEGACY_ENV_PATH)) {
   console.warn(
-    `warning: ${ENV_PATH} not found — copy web/.env.example to web/.env and set ` +
+    `warning: ${ENV_PATH} not found — copy .env.example to .env and set ` +
       `ADMIN_EMAIL + ADMIN_PASSWORD, or login will always fail.`
   );
 }

@@ -280,7 +280,7 @@ function GlobalConfigCard({ projectId }: { projectId: string | null }) {
 }
 
 function StateSummary({ projectId }: { projectId: string | null }) {
-  const [line, setLine] = useState<string | null>(null);
+  const [summary, setSummary] = useState<SystemState | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -288,7 +288,7 @@ function StateSummary({ projectId }: { projectId: string | null }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setLine(null);
+    setSummary(null);
     setWarning(null);
     setError(null);
     // projectId is optional: without it the server uses the repo-root default
@@ -301,9 +301,7 @@ function StateSummary({ projectId }: { projectId: string | null }) {
       .then((data) => {
         if (cancelled) return;
         if (data.ok && data.state) {
-          setLine(
-            `current ${data.state.current} · previous ${data.state.previous ?? '—'} · max ever ${data.state.maxEver} · keep ${data.state.keep}`,
-          );
+          setSummary(data.state);
         } else {
           setWarning(data.error ?? 'System is not initialized.');
         }
@@ -334,8 +332,27 @@ function StateSummary({ projectId }: { projectId: string | null }) {
           <p data-ref="page-system-status-state-warning" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
             {warning} Run system init below, or see <Link data-ref="page-system-link-images" to="/images">Images</Link>.
           </p>
-        ) : line ? (
-          <p data-ref="page-system-status-state" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>{line}</p>
+        ) : summary ? (
+          <dl data-ref="page-system-status-state" style={{ margin: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px 24px' }}>
+            <div>
+              <dt style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Current</dt>
+              <dd style={{ margin: '4px 0 0' }}>
+                <Badge tone="accent">{summary.current}</Badge>
+              </dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Previous</dt>
+              <dd style={{ margin: '4px 0 0', fontSize: 'var(--font-size-md)' }}>{summary.previous ?? '—'}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Max ever</dt>
+              <dd style={{ margin: '4px 0 0', fontSize: 'var(--font-size-md)' }}>{summary.maxEver}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-muted)' }}>Keep</dt>
+              <dd style={{ margin: '4px 0 0', fontSize: 'var(--font-size-md)' }}>{summary.keep}</dd>
+            </div>
+          </dl>
         ) : (
           <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}>
             No state to show yet.

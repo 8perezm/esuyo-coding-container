@@ -19,7 +19,6 @@ export function ProjectCreatePage() {
   const { setActiveId, refresh } = useProjects();
   const navigate = useNavigate();
   const [name, setName] = useState('');
-  const [configPath, setConfigPath] = useState('');
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -27,20 +26,18 @@ export function ProjectCreatePage() {
     e.preventDefault();
     setFormError(null);
     const trimmedName = name.trim();
-    const trimmedPath = configPath.trim();
-    if (!trimmedName || !trimmedPath) {
-      setFormError('Name and config path are both required.');
+    if (!trimmedName) {
+      setFormError('Name is required.');
       return;
     }
     setCreating(true);
     try {
       const res = await api.post<CreateProjectResponse>('/api/projects', {
         name: trimmedName,
-        configPath: trimmedPath,
       });
       setActiveId(res.project.id);
       await refresh();
-      navigate('/projects');
+      navigate(`/projects/${encodeURIComponent(res.project.id)}/edit`);
     } catch (err) {
       setFormError(errMsg(err));
     } finally {
@@ -52,7 +49,7 @@ export function ProjectCreatePage() {
     <div data-ref="page-project-create">
       <PageHeader
         title="Add project"
-        description="Point it at a config file that already exists on the server."
+        description="Give it a name — its config file will live in the system folder until you change it in Settings."
         actions={
           <Link to="/projects" className="btn btn-secondary" data-ref="page-project-create-back">
             Back to projects
@@ -77,18 +74,9 @@ export function ProjectCreatePage() {
               autoComplete="off"
               data-ref="page-project-create-input-name"
             />
-          </div>
-          <div>
-            <Label htmlFor="project-config-path">Config path</Label>
-            <Input
-              id="project-config-path"
-              value={configPath}
-              onChange={(e) => setConfigPath(e.target.value)}
-              placeholder="/data/projects/my-project/config.yaml"
-              autoComplete="off"
-              spellCheck={false}
-              data-ref="page-project-create-input-config-path"
-            />
+            <p style={{ margin: '8px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }} data-ref="page-project-create-autopath-hint">
+              No path needed — the config is stored for you. Add its content on the next page.
+            </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }} data-ref="page-project-create-actions">
             <Button type="submit" disabled={creating} data-ref="page-project-create-submit">

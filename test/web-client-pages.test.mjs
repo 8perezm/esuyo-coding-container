@@ -13,6 +13,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sshPath = path.join(root, 'web/client/src/pages/SshKeysPage.tsx');
 const validatePath = path.join(root, 'web/client/src/components/ValidatePanel.tsx');
 const editPath = path.join(root, 'web/client/src/pages/ProjectEditPage.tsx');
+const createPath = path.join(root, 'web/client/src/pages/ProjectCreatePage.tsx');
 const systemPath = path.join(root, 'web/client/src/pages/SystemPage.tsx');
 const appPath = path.join(root, 'web/client/src/App.tsx');
 const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.tsx');
@@ -20,6 +21,7 @@ const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.ts
 const ssh = await readFile(sshPath, 'utf8');
 const validate = await readFile(validatePath, 'utf8');
 const edit = await readFile(editPath, 'utf8');
+const create = await readFile(createPath, 'utf8');
 const system = await readFile(systemPath, 'utf8');
 const app = await readFile(appPath, 'utf8');
 const sidebar = await readFile(sidebarPath, 'utf8');
@@ -166,5 +168,22 @@ describe('ValidatePanel placement contract', () => {
     assert.ok(!app.includes('path="validate"'), 'App must not route /validate');
     assert.ok(!sidebar.includes("'/validate'"), 'Sidebar must not link to /validate');
     assert.ok(!sidebar.includes('Validate'), 'Sidebar must not show a Validate entry');
+  });
+});
+
+describe('Project create/edit contract (managed configs + starter)', () => {
+  it('create page is name-only and posts just the name', () => {
+    assert.match(create, /export function ProjectCreatePage\(\)/);
+    assert.ok(create.includes('page-project-create-input-name'), 'missing name input ref');
+    assert.ok(!create.includes('page-project-create-input-config-path'), 'create page must not ask for a config path');
+    assert.ok(create.includes("'/api/projects'"), 'must POST to /api/projects');
+    assert.ok(create.includes('/projects/${encodeURIComponent(res.project.id)}/edit'), 'must land on the edit page to fill the config');
+  });
+
+  it('edit page keeps the path field and offers fill/download starter actions', () => {
+    assert.ok(edit.includes('page-project-edit-input-config-path'), 'settings must keep the config path field');
+    assert.ok(edit.includes('page-project-edit-config-fill'), 'missing fill-with-example button');
+    assert.ok(edit.includes('page-project-edit-config-download'), 'missing download-example button');
+    assert.ok(edit.includes('/api/project-starter?projectId='), 'must fetch the starter from /api/project-starter');
   });
 });

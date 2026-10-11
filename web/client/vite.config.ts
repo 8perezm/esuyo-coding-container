@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Dev proxy targets the local API (same `PORT` as web/.env, default 3001) so
+// Dev proxy targets the local API (same `PORT` as .env, default 3001) so
 // same-origin fetch('/api/...') calls work in dev. Override with
 // VITE_API_TARGET when the API runs elsewhere.
 const apiTarget = process.env.VITE_API_TARGET ?? 'http://127.0.0.1:3001';
@@ -14,6 +14,7 @@ export default defineConfig({
       '/api': {
         target: apiTarget,
         changeOrigin: true,
+        ws: true,
       },
     },
   },

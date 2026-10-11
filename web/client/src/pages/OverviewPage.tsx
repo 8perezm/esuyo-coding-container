@@ -122,6 +122,16 @@ function statusLabel(w: Workload): string {
   return 'Degraded';
 }
 
+function isRunning(w: Workload): boolean {
+  return Boolean(w.deployed && w.ready);
+}
+
+function compareWorkloads(a: Workload, b: Workload): number {
+  const runningDiff = Number(isRunning(b)) - Number(isRunning(a));
+  if (runningDiff !== 0) return runningDiff;
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
 function clusterErr(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
     return 'endpoint not found (404) — the GUI server is running old code. Restart it from this repo (see below) so it serves /api/cluster/*.';
@@ -150,7 +160,7 @@ export function OverviewPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ op: string; project: string; id: string; status: string } | null>(null);
-  const [rowJobs, setRowJobs] = useState<Record<string, { op: string; project: string; id: string; status: string }>>({});
+  const [rowJobs, setRowJobs] = useState<Record<string, { op: string; project: string; id: string; status: string; startedAt: number }>>({});
   const [deleteTarget, setDeleteTarget] = useState<Workload | null>(null);
 
   const load = useCallback(async (initial = false) => {
@@ -218,7 +228,7 @@ export function OverviewPage() {
     setPending(`${op}:${w.projectId}`);
     try {
       const job = await api.post<JobStarted>('/api/jobs', { op, projectId: w.projectId, args: {} });
-      const entry = { op, project: w.name, id: job.id, status: job.status };
+      const entry = { op, project: w.name, id: job.id, status: job.status, startedAt: Date.now() };
       setNotice(entry);
       setRowJobs((prev) => ({ ...prev, [w.projectId as string]: entry }));
     } catch (err) {
@@ -236,7 +246,7 @@ export function OverviewPage() {
     setPending(`delete:${w.projectId}`);
     try {
       const job = await api.post<JobStarted>('/api/jobs', { op: 'delete', projectId: w.projectId, args: {} });
-      const entry = { op: 'delete', project: w.name, id: job.id, status: job.status };
+      const entry = { op: 'delete', project: w.name, id: job.id, status: job.status, startedAt: Date.now() };
       setNotice(entry);
       setRowJobs((prev) => ({ ...prev, [w.projectId as string]: entry }));
     } catch (err) {
@@ -254,8 +264,29 @@ export function OverviewPage() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  // Auto-hide row job notices 10 seconds after they started.
+  useEffect(() => {
+    const ids = Object.keys(rowJobs);
+    if (ids.length === 0) return;
+    const prune = () => {
+      setRowJobs((prev) => {
+        const cutoff = Date.now() - 10000;
+        const next: typeof prev = {};
+        for (const [id, entry] of Object.entries(prev)) {
+          if (entry.startedAt > cutoff) next[id] = entry;
+        }
+        return next;
+      });
+    };
+    const oldest = Math.min(...ids.map((id) => rowJobs[id]?.startedAt ?? Date.now()));
+    const delay = Math.max(oldest + 10000 - Date.now(), 0);
+    const timer = window.setTimeout(prune, delay);
+    return () => window.clearTimeout(timer);
+  }, [rowJobs]);
+
   const runningCount = workloads?.filter((w) => w.deployed && w.ready).length ?? 0;
   const readyNodes = nodes?.filter((n) => n.ready).length ?? 0;
+  const sortedWorkloads = workloads ? [...workloads].sort(compareWorkloads) : workloads;
 
   const stats = [
     { label: 'Projects running', to: '/projects', hint: `${runningCount} / ${workloads?.length ?? '—'} deployed`, value: !loaded ? '…' : `${runningCount}/${workloads?.length ?? 0}` },
@@ -338,7 +369,9 @@ export function OverviewPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} aria-label="Loading dashboard" data-ref="page-overview-loading">
           <div className="skeleton" style={{ height: 48 }} />
           <div className="skeleton" style={{ height: 48 }} />
-          <Spinner label="Loading cluster status…" />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
+            <Spinner label="Loading cluster status…" />
+          </div>
         </div>
       ) : workloadsError && (!workloads || workloads.length === 0) ? (
         <Card data-ref="page-overview-workloads-error-card"><p role="alert" style={{ margin: 0, fontSize: 'var(--font-size-md)' }} data-ref="page-overview-workloads-error">Could not load workloads: {workloadsError}</p></Card>
@@ -361,7 +394,7 @@ export function OverviewPage() {
               </TR>
             </THead>
             <TBody>
-              {workloads.map((w) => {
+              {sortedWorkloads!.map((w) => {
                 const key = w.projectId ?? w.name;
                 const isPending = pending === `deploy:${w.projectId}` || pending === `delete:${w.projectId}`;
                 const cpuText = !w.deployed ? '—' : w.pods.length === 0 ? '—' : w.pods.map((p) => p.cpu ?? '—').join(', ');
@@ -424,7 +457,7 @@ export function OverviewPage() {
                           title={!w.deployed ? 'Nothing deployed' : undefined}
                           data-ref="page-overview-action-delete"
                         >
-                          <Trash2 size={16} aria-hidden="true" /> {pending === `delete:${w.projectId}` ? 'Starting…' : 'Delete'}
+                          <Trash2 size={16} aria-hidden="true" />{pending === `delete:${w.projectId}` ? ' Starting…' : null}
                         </Button>
                       </span>
                       {w.projectId && rowJobs[w.projectId] ? (
@@ -432,6 +465,7 @@ export function OverviewPage() {
                           key={rowJobs[w.projectId].id}
                           job={{ id: rowJobs[w.projectId].id, op: rowJobs[w.projectId].op, status: rowJobs[w.projectId].status }}
                           dataRef="page-overview-row-job"
+                          compact
                         />
                       ) : null}
                     </TD>

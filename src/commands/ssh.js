@@ -1,5 +1,6 @@
 import net from "node:net";
-import { exec, run, start } from "../utils/exec.js";
+import { run, start } from "../utils/exec.js";
+import { resolveSshNodeIp } from "../utils/node-ip.js";
 import { ensureKeyPair } from "../utils/keys.js";
 import { ephemeralKnownHostsFile, removeLegacyKnownHostsFile } from "../utils/ssh-config.js";
 
@@ -53,12 +54,13 @@ function sshCommonOptions(cfg, port, privateKey) {
 }
 
 async function sshDirect(cfg, privateKey) {
-  const nodeIp = exec("kubectl", [
-    "get",
-    "nodes",
-    "-o",
-    "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}",
-  ]);
+  // Same resolution as deploy: the pod's own (Ready) node, else the first
+  // Ready node. Never items[0] blindly — a NotReady node drops NodePort
+  // traffic even though the Service looks fine.
+  const nodeIp = resolveSshNodeIp(cfg);
+  if (!nodeIp) {
+    throw new Error("could not resolve a Ready cluster node for --direct (is any node Ready?)");
+  }
   await run("ssh", [...sshCommonOptions(cfg, cfg.k8s.nodePort, privateKey), `${cfg.ssh.user}@${nodeIp}`]);
 }
 

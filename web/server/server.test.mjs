@@ -7,17 +7,24 @@ import {
   ALLOWED_OPS,
   REPO_ROOT,
   buildJobArgv,
+  buildStarterYaml,
   captureOutput,
   configuredPorts,
   createServer,
+  findClaimedNodePorts,
+  findTakenNodePorts,
   getWorkloadsStatus,
+  isManagedConfigPath,
+  managedProjectsDir,
   parseCookies,
   parseDotEnv,
   parseTopNodes,
   parseTopPods,
   redactConfig,
+  slugifyProjectName,
   sortSshEntries,
   trimLogs,
+  uniqueManagedConfigPath,
   updateEnvFilePassword,
   validatePasswordChange,
 } from "./server.js";
@@ -152,7 +159,7 @@ test("trimLogs: short logs pass through, long logs keep the last 200KB", () => {
 });
 
 test(".env.example exists with required keys", () => {
-  const raw = fs.readFileSync(path.join(REPO_ROOT, "web", ".env.example"), "utf8");
+  const raw = fs.readFileSync(path.join(REPO_ROOT, ".env.example"), "utf8");
   const parsed = parseDotEnv(raw);
   assert.ok(parsed.ADMIN_EMAIL);
   assert.ok(parsed.ADMIN_PASSWORD);
@@ -472,6 +479,389 @@ test("http: POST /api/validate + /api/manifest validate unsaved drafts without t
         const leftovers = fs.readdirSync(dir).filter((f) => f.includes("draft"));
         assert.deepEqual(leftovers, []);
       }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
+  }
+});
+
+test("slugifyProjectName: lowercases, dashes, trims, fallbacks", () => {
+  assert.equal(slugifyProjectName("My Project!"), "my-project");
+  assert.equal(slugifyProjectName("  --Foo__Bar--  "), "foo-bar");
+  assert.equal(slugifyProjectName(""), "project");
+  assert.equal(slugifyProjectName("!!!"), "project");
+  assert.ok(slugifyProjectName("a".repeat(100)).length <= 63);
+});
+
+test("managed paths: dir, detection, unique suffix", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-managed-"));
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(tmp, "xdg");
+  try {
+    const dir = managedProjectsDir();
+    assert.ok(dir.endsWith(path.join("coding-container", "projects")) || dir.includes("projects"));
+    const managed = path.join(dir, "demo", "config.yaml");
+    const custom = path.join(tmp, "elsewhere", "config.yaml");
+    assert.equal(isManagedConfigPath(managed), true);
+    assert.equal(isManagedConfigPath(custom), false);
+    // Suffix when taken by registry or disk.
+    const projects = [{ id: "a", name: "demo", configPath: managed }];
+    assert.equal(uniqueManagedConfigPath(projects, "demo").slug, "demo-2");
+    assert.equal(uniqueManagedConfigPath([], "fresh").slug, "fresh");
+    fs.mkdirSync(path.dirname(managed), { recursive: true });
+    fs.writeFileSync(managed, "project: demo\n");
+    assert.equal(uniqueManagedConfigPath([], "demo").slug, "demo-2");
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
+  }
+});
+
+test("http: GET /api/global-config reports the system Dockerfile location", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-global-df-"));
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(tmp, "xdg");
+  try {
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, "coding-container");
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, "config.yaml"), "image:\n  registry: registry.example.com\n");
+    fs.writeFileSync(path.join(globalDir, "Dockerfile"), "FROM scratch\n");
+    const env = {
+      adminEmail: "admin@example.com",
+      adminPassword: "s3cret",
+      port: 0,
+      projectsFile: path.join(tmp, "projects.json"),
+      allowedOrigin: "",
+    };
+    const server = createServer(env);
+    await new Promise((resolve) => server.listen(0, resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const login = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com", password: "s3cret" }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+
+      let r = await fetch(`${base}/api/global-config`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      let body = await r.json();
+      assert.equal(body.dockerfile.path, path.join(globalDir, "Dockerfile"));
+      assert.equal(body.dockerfile.exists, true);
+
+      // Custom image.dockerfile in the global layer is honored.
+      fs.writeFileSync(
+        path.join(globalDir, "config.yaml"),
+        "image:\n  registry: registry.example.com\n  dockerfile: custom/Dockerfile\n"
+      );
+      r = await fetch(`${base}/api/global-config`, { headers: { cookie } });
+      body = await r.json();
+      assert.equal(body.dockerfile.path, path.join(globalDir, "custom", "Dockerfile"));
+      assert.equal(body.dockerfile.exists, false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
+  }
+});
+
+test("buildStarterYaml: app + postgres sidecar with interpolated slug/ports", () => {
+  const yaml = buildStarterYaml({ slug: "My App!", mainNodePort: 30022, dbNodePort: 30432 });
+  assert.ok(yaml.includes("project: my-app"));
+  assert.ok(yaml.includes("nodePort: 30022"));
+  assert.ok(yaml.includes("name: postgres"));
+  assert.ok(yaml.includes("postgres:18.6"));
+  assert.ok(yaml.includes("containerPort: 5432"));
+  assert.ok(yaml.includes("nodePort: 30432"));
+  assert.ok(yaml.includes("POSTGRES_USER: my-app"));
+  assert.ok(yaml.includes("POSTGRES_DB: my-app"));
+  assert.ok(yaml.includes("POSTGRES_PASSWORD: my-app"));
+  assert.ok(yaml.includes("app-my-app.example.com"));
+});
+
+test("findTakenNodePorts: flags foreign holders, ignores own service and free ports", () => {
+  const cfg = {
+    project: "demo",
+    k8s: {
+      namespace: "coding",
+      nodePort: 30022,
+      sidecars: [{ name: "db", ports: [{ containerPort: 5432, nodePort: 30432 }] }],
+    },
+    web: { ports: [{ port: 3000, hosts: ["web.example.com"], nodePort: 30080 }] },
+  };
+  const live = {
+    ports: [
+      { namespace: "coding", service: "other", nodePort: 30022 },
+      { namespace: "coding", service: "demo", nodePort: 30432 },
+      { namespace: "coding", service: "someone", nodePort: 30080 },
+    ],
+  };
+  const taken = findTakenNodePorts(cfg, live);
+  assert.deepEqual(
+    taken.map((t) => t.nodePort),
+    [30022, 30080]
+  );
+  assert.equal(taken[0].service, "other");
+  assert.equal(taken[1].label, "web port 3000");
+  // Own service's port is not flagged; unknown shapes degrade to empty.
+  assert.deepEqual(findTakenNodePorts(cfg, { ports: [] }), []);
+  assert.deepEqual(findTakenNodePorts(cfg, null), []);
+});
+
+test("findClaimedNodePorts: flags ports claimed by other saved configs", () => {
+  const wanted = [
+    { nodePort: 30022, label: "ssh" },
+    { nodePort: 30432, label: "sidecar db" },
+  ];
+  const claimed = findClaimedNodePorts(wanted, [
+    { name: "blog", wanted: [{ nodePort: 30022, label: "ssh" }] },
+    { name: "shop", wanted: [{ nodePort: 30099, label: "ssh" }] },
+  ]);
+  assert.deepEqual(
+    claimed.map((c) => [c.nodePort, c.project, c.projectLabel]),
+    [[30022, "blog", "ssh"]]
+  );
+  assert.deepEqual(findClaimedNodePorts(wanted, []), []);
+});
+test("http: validate mentions cluster-taken NodePorts but still passes; silent offline", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-ports-"));
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const prevKubectl = process.env.KUBECTL_BIN;
+  process.env.XDG_CONFIG_HOME = path.join(tmp, "xdg");
+  try {
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, "coding-container");
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalDir, "config.yaml"),
+      "image:\n  registry: registry.example.com\nnfs:\n  server: nas.local\n  basePath: /data\n"
+    );
+    const projDir = path.join(tmp, "proj");
+    fs.mkdirSync(projDir, { recursive: true });
+    const configPath = path.join(projDir, "config.yaml");
+    fs.writeFileSync(
+      configPath,
+      "project: demo\nk8s:\n  sidecars:\n    - name: db\n      image: postgres:18.6\n      ports:\n        - { containerPort: 5432, nodePort: 30432 }\n"
+    );
+    const projectsFile = path.join(tmp, "projects.json");
+    fs.writeFileSync(projectsFile, JSON.stringify([{ id: "p1", name: "demo", configPath }]));
+
+    const stubDir = path.join(tmp, "stub");
+    fs.mkdirSync(stubDir, { recursive: true });
+    const svcJson = JSON.stringify({
+      items: [
+        { metadata: { namespace: "coding", name: "other" }, spec: { ports: [{ nodePort: 30022 }] } },
+        { metadata: { namespace: "coding", name: "demo" }, spec: { ports: [{ nodePort: 30432 }] } },
+      ],
+    });
+    fs.writeFileSync(
+      path.join(stubDir, "kubectl-stub.js"),
+      [
+        'const joined = process.argv.slice(2).join(" ");',
+        'function out(s) { process.stdout.write(s + "\\n"); }',
+        'function die(msg) { process.stderr.write(msg + "\\n"); process.exit(1); }',
+        'if (joined.startsWith("get svc")) {',
+        `  out(${JSON.stringify(svcJson)});`,
+        '} else if (joined.startsWith("get cm")) {',
+        '  die(\'Error from server (NotFound): configmaps "coding-system" not found\');',
+        "} else {",
+        '  die("unexpected kubectl args: " + joined);',
+        "}",
+      ].join("\n")
+    );
+    process.env.KUBECTL_BIN = path.join(stubDir, "kubectl-stub.js");
+
+    const env = {
+      adminEmail: "admin@example.com",
+      adminPassword: "s3cret",
+      port: 0,
+      projectsFile,
+      allowedOrigin: "",
+    };
+    const server = createServer(env);
+    await new Promise((resolve) => server.listen(0, resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const login = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com", password: "s3cret" }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+
+      // Foreign-held ssh port is mentioned; own sidecar port is not; still ok.
+      let r = await fetch(`${base}/api/validate?projectId=p1`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      let body = await r.json();
+      assert.equal(body.ok, true);
+      const text = (body.lines ?? []).join("\n");
+      assert.ok(text.includes('nodePort 30022') && text.includes('service "other"'), "must mention the taken port");
+      assert.ok(
+        (body.lines ?? [])[0].includes("nodePort 30022"),
+        "taken-port warning must be the first validation line"
+      );
+      assert.ok(!text.includes("30432"), "must not flag the project's own port");
+      assert.deepEqual(
+        body.portConflicts.map((c) => c.nodePort),
+        [30022]
+      );
+
+      // Inactive project claiming a port in its saved YAML is also mentioned.
+      const blogPath = path.join(projDir, "blog.yaml");
+      fs.writeFileSync(
+        blogPath,
+        "project: blog\nk8s:\n  sidecars:\n    - name: db\n      image: postgres:18.6\n      ports:\n        - { containerPort: 5432, nodePort: 30432 }\n"
+      );
+      const registry = JSON.parse(fs.readFileSync(projectsFile, "utf8"));
+      registry.push({ id: "p2", name: "blog", configPath: blogPath });
+      fs.writeFileSync(projectsFile, JSON.stringify(registry));
+      r = await fetch(`${base}/api/validate?projectId=p1`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      body = await r.json();
+      assert.equal(body.ok, true);
+      const claimedText = (body.lines ?? []).join("\n");
+      assert.ok(
+        claimedText.includes("nodePort 30432") && claimedText.includes('also claimed by project "blog"'),
+        "must mention the port claimed by the inactive project"
+      );
+      assert.ok(
+        (body.lines ?? [])[0].includes("already in use"),
+        "cluster conflicts stay above YAML-claim warnings"
+      );
+      const claim = body.portConflicts.find((c) => c.nodePort === 30432);
+      assert.equal(claim?.source, "project");
+      assert.equal(claim?.project, "blog");
+
+      // Validating blog itself never flags its own claim.
+      r = await fetch(`${base}/api/validate?projectId=p2`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      body = await r.json();
+      assert.equal(body.ok, true);
+      assert.ok(
+        !(body.lines ?? []).join("\n").includes('also claimed by project "blog"'),
+        "a project must not warn about its own saved config"
+      );
+
+      // Unreachable cluster: still passes; cluster warnings drop out but local
+      // YAML-claim warnings still apply (they need no cluster).
+      fs.writeFileSync(
+        path.join(stubDir, "kubectl-stub.js"),
+        'process.stderr.write("no cluster\\n"); process.exit(1);\n'
+      );
+      r = await fetch(`${base}/api/validate?projectId=p1`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      body = await r.json();
+      assert.equal(body.ok, true);
+      assert.deepEqual(
+        body.portConflicts.map((c) => [c.nodePort, c.source]),
+        [
+          [30022, "project"],
+          [30432, "project"],
+        ]
+      );
+      const offlineText = (body.lines ?? []).join("\n");
+      assert.ok(!offlineText.includes("already in use"), "no cluster warnings while offline");
+      assert.ok(offlineText.includes("also claimed"), "YAML-claim warnings still apply offline");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
+    if (prevKubectl === undefined) delete process.env.KUBECTL_BIN;
+    else process.env.KUBECTL_BIN = prevKubectl;
+  }
+});
+test("http: name-only create assigns managed path; rename moves file; starter works", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-projects-"));
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(tmp, "xdg");
+  try {
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, "coding-container");
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalDir, "config.yaml"),
+      "image:\n  registry: registry.example.com\nnfs:\n  server: nas.local\n  basePath: /data\n"
+    );
+    const env = {
+      adminEmail: "admin@example.com",
+      adminPassword: "s3cret",
+      port: 0,
+      projectsFile: path.join(tmp, "projects.json"),
+      allowedOrigin: "",
+    };
+    const server = createServer(env);
+    await new Promise((resolve) => server.listen(0, resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const login = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com", password: "s3cret" }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+      const json = (method, p, body) =>
+        fetch(`${base}${p}`, {
+          method,
+          headers: { cookie, "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+
+      // Name-only create: no file on disk yet, managed path assigned.
+      let r = await json("POST", "/api/projects", { name: "My Project!" });
+      assert.equal(r.status, 201);
+      let created = (await r.json()).project;
+      assert.equal(created.name, "My Project!");
+      assert.equal(isManagedConfigPath(created.configPath), true);
+      assert.ok(created.configPath.endsWith(path.join("my-project", "config.yaml")));
+      assert.equal(fs.existsSync(created.configPath), false);
+
+      // Same name again → suffixed slug.
+      r = await json("POST", "/api/projects", { name: "My Project!" });
+      assert.equal(r.status, 201);
+      const second = (await r.json()).project;
+      assert.ok(second.configPath.endsWith(path.join("my-project-2", "config.yaml")));
+
+      // Save a config, then rename → file moves, content preserved.
+      const yaml = "project: my-project\n";
+      r = await json("PUT", "/api/config", { projectId: created.id, yaml });
+      assert.equal(r.status, 200);
+      assert.equal(fs.readFileSync(created.configPath, "utf8"), yaml);
+      r = await json("PUT", `/api/projects/${created.id}`, { name: "Renamed!" });
+      assert.equal(r.status, 200);
+      const renamed = (await r.json()).project;
+      assert.equal(renamed.name, "Renamed!");
+      assert.ok(renamed.configPath.endsWith(path.join("renamed", "config.yaml")));
+      assert.equal(fs.existsSync(created.configPath), false);
+      assert.equal(fs.readFileSync(renamed.configPath, "utf8"), yaml);
+
+      // Custom paths stay put on rename.
+      const customPath = path.join(tmp, "custom", "config.yaml");
+      fs.mkdirSync(path.dirname(customPath), { recursive: true });
+      fs.writeFileSync(customPath, "project: custom\n");
+      r = await json("POST", "/api/projects", { name: "Custom", configPath: customPath });
+      assert.equal(r.status, 201);
+      const custom = (await r.json()).project;
+      r = await json("PUT", `/api/projects/${custom.id}`, { name: "Custom2" });
+      assert.equal(r.status, 200);
+      assert.equal((await r.json()).project.configPath, custom.configPath);
+      assert.equal(fs.existsSync(customPath), true);
+
+      // Starter endpoint renders the example for the project.
+      r = await fetch(`${base}/api/project-starter?projectId=${created.id}`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      const starter = await r.json();
+      assert.equal(starter.slug, "renamed");
+      assert.ok(starter.yaml.includes("project: renamed"));
+      assert.ok(starter.yaml.includes("postgres"));
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

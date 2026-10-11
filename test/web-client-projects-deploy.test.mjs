@@ -58,16 +58,23 @@ describe('ProjectsPage contract', () => {
     assert.match(projects, /useProjects/);
   });
 
-  it('renders active/inactive tables with Name, Mode, Image, Namespace, NodePort, Actions and no config paths', () => {
+  it('renders active/inactive tables with Name, Image, Namespace, NodePort, Actions and no config paths', () => {
     assert.match(projects, /<Table/);
-    for (const col of ['Name', 'Mode', 'Image', 'Namespace', 'NodePort', 'Actions']) {
+    for (const col of ['Name', 'Image', 'Namespace', 'NodePort', 'Actions']) {
       assert.ok(projects.includes(col), `missing column ${col}`);
     }
+    assert.ok(!projects.includes('<TH>Mode</TH>'), 'Mode column must be removed');
     assert.ok(!projects.includes('Config path'), 'config paths must not be shown in tables');
     assert.ok(!projects.includes('page-projects-active-card'), 'active detail card must be removed');
     for (const ref of ['page-projects-row-create', 'page-projects-row-deploy', 'page-projects-row-workloads-delete']) {
       assert.ok(projects.includes(ref), `missing per-row action ${ref}`);
     }
+  });
+
+  it('prefers the cluster-resolved image (with version) from workloads over the saved config', () => {
+    assert.ok(projects.includes('/api/cluster/workloads'), 'must load workloads status');
+    assert.ok(projects.includes('workloadImages'), 'must map workload images by project');
+    assert.ok(projects.includes('imageDisplay'), 'row must render the resolved image with version');
   });
 
   it('marks the active project with a Badge and no Select active button', () => {

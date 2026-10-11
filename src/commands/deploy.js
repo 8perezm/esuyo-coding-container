@@ -1,5 +1,6 @@
 import path from "node:path";
 import { exec, run, runWithInput } from "../utils/exec.js";
+import { resolveSshNodeIp } from "../utils/node-ip.js";
 import { ensureKeyPair, readPublicKey } from "../utils/keys.js";
 import { ensurePullSecret } from "../utils/registry.js";
 import { fullManifest, webPorts, sidecarNodePorts as sidecarNodePortsList } from "../utils/manifest.js";
@@ -79,16 +80,12 @@ export async function deploy(cfg, { wait = true } = {}) {
   }
   console.log(`Deployed ${cfg.project} in ${cfg.k8s.namespace}`);
 
-  // Node IP for the NodePort hints below and the SSH alias.
+  // Node IP for the NodePort hints below and the SSH alias: the node the
+  // pod actually runs on (when Ready), else the first Ready node. A NotReady
+  // node never serves NodePorts, so items[0] is not a valid default.
   let nodeIp;
   try {
-    nodeIp = exec(kubectl, [
-      ...kargs,
-      "get",
-      "nodes",
-      "-o",
-      "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}",
-    ], kopts);
+    nodeIp = resolveSshNodeIp(cfg);
   } catch {
     /* handled below */
   }

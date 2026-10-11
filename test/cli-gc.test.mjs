@@ -41,9 +41,22 @@ function startServer() {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ name: "foo/bar", tags: registryTags }));
       }
-      if (req.method === "DELETE" && url.pathname.startsWith("/v2/foo/bar/tags/")) {
+      if (req.method === "GET" && url.pathname.startsWith("/v2/foo/bar/manifests/")) {
         if (!ok) { res.writeHead(401, { "WWW-Authenticate": challenge }); return res.end(); }
         const tag = decodeURIComponent(url.pathname.split("/").pop());
+        if (!registryTags.includes(tag)) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, {
+          "Content-Type": "application/vnd.docker.distribution.manifest.v2+json",
+          "Docker-Content-Digest": `sha256:${tag}`,
+        });
+        return res.end(JSON.stringify({}));
+      }
+      if (req.method === "DELETE" && url.pathname.startsWith("/v2/foo/bar/manifests/")) {
+        if (!ok) { res.writeHead(401, { "WWW-Authenticate": challenge }); return res.end(); }
+        let ref = decodeURIComponent(url.pathname.split("/").pop());
+        // Digest form is sha256:<tag>; direct-tag form (Gitea fallback) is the tag itself.
+        const tag = ref.startsWith("sha256:") ? ref.slice("sha256:".length) : ref;
+        if (!registryTags.includes(tag)) { res.writeHead(404); return res.end(); }
         deleted.push(tag);
         registryTags = registryTags.filter((t) => t !== tag);
         res.writeHead(202);

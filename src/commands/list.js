@@ -3,6 +3,7 @@ import {
   ephemeralKnownHostsFile,
   listHostEntries,
   sshConfigPath,
+  sshProjectFromAlias,
 } from "../utils/ssh-config.js";
 import { exec } from "../utils/exec.js";
 import { kubectlExec } from "../utils/system-config.js";
@@ -194,7 +195,11 @@ export function listUpdateSsh({ file, dryRun = false } = {}) {
   let updated = 0;
   let current = 0;
   for (const entry of entries) {
-    const project = entry.alias.replace(/^coding-/, "");
+    const project = sshProjectFromAlias(entry.alias);
+    if (project === null) {
+      console.log(`"${entry.alias}": belongs to another copy (different SSH prefix) — leaving it untouched`);
+      continue;
+    }
     const matches = services.get(project) ?? [];
     if (matches.length === 0) {
       console.warn(

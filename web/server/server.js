@@ -2,10 +2,11 @@
 /**
  * Web GUI backend for coding-container.
  *
- * Single-file Node ESM HTTP server. Only node: builtins + js-yaml (already
- * a dependency). No other npm packages.
+ * Single-file Node ESM HTTP server (plus web/server/ssh-terminal.js, the
+ * browser-terminal WebSocket transport). Only node: builtins + js-yaml and
+ * ssh2 (both dependencies).
  *
- *   node web/server/server.js          # reads web/.env, serves the API + SPA
+ *   node web/server/server.js          # reads .env (root), serves the API + SPA
  *
  * Sections:
  *   1. paths & .env handling
@@ -25,7 +26,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 
-import { loadConfig, imageRef, globalConfigPath } from "../../src/config.js";
+import { loadConfig, imageRef, globalConfigDir, globalConfigPath } from "../../src/config.js";
 import { validate } from "../../src/commands/validate.js";
 import { listHostEntries } from "../../src/utils/ssh-config.js";
 import { ensureKeyPair, readPublicKey } from "../../src/utils/keys.js";
@@ -35,8 +36,10 @@ import {
   resolveDeployTag,
 } from "../../src/utils/system-config.js";
 import { exec } from "../../src/utils/exec.js";
+import { allocateNodePort } from "../../src/utils/project.js";
 import { sidecarNodePorts, webPorts } from "../../src/utils/manifest.js";
 import { listTags } from "../../src/utils/registry-api.js";
+import { attachSshTerminal } from "./ssh-terminal.js";
 
 // ---------------------------------------------------------------- paths ---
 
@@ -44,6 +47,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, "..", "..");
 export const WEB_DIR = path.join(REPO_ROOT, "web");
 export const DIST_DIR = path.join(WEB_DIR, "client", "dist");
+// Single environment file (root .env). A legacy web/.env still works as a
+// read-only fallback so existing checkouts keep working after the move.
+export const ROOT_ENV_FILE = path.join(REPO_ROOT, ".env");
+export const LEGACY_WEB_ENV_FILE = path.join(WEB_DIR, ".env");
 const CLI_INDEX = path.join(REPO_ROOT, "src", "index.js");
 
 // --------------------------------------------------------------- constants ---
@@ -123,13 +130,13 @@ function resolveProjectsFile(raw) {
 }
 
 /**
- * Persist a new ADMIN_PASSWORD to the web/.env file, preserving all other
+ * Persist a new ADMIN_PASSWORD to the .env file, preserving all other
  * lines and comments. Returns { persisted, warning } — persisted is false
  * when a real ADMIN_PASSWORD environment variable overrides the file (the
  * file is still updated, but a restart would restore the env value).
  */
 export function updateEnvFilePassword(envFile, newPassword) {
-  const target = envFile || path.join(WEB_DIR, ".env");
+  const target = envFile || ROOT_ENV_FILE;
   let raw = "";
   try {
     raw = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
@@ -158,7 +165,7 @@ export function updateEnvFilePassword(envFile, newPassword) {
   if (process.env.ADMIN_PASSWORD !== undefined && process.env.ADMIN_PASSWORD !== "") {
     return {
       persisted: false,
-      warning: "ADMIN_PASSWORD environment variable overrides web/.env — change applies until restart",
+      warning: "ADMIN_PASSWORD environment variable overrides .env — change applies until restart",
     };
   }
   return { persisted: true };
@@ -174,19 +181,20 @@ export function validatePasswordChange(currentPassword, newPassword) {
 }
 
 /**
- * Server config: web/.env file values, with real environment variables
+ * Server config: .env file values, with real environment variables
  * taking precedence (so containers can override without editing the file).
+ * A legacy web/.env fills in keys missing from the root .env.
  */
 export function loadEnvConfig() {
-  let fromFile = {};
-  const envPath = path.join(WEB_DIR, ".env");
-  if (fs.existsSync(envPath)) {
+  const readFile = (p) => {
+    if (!fs.existsSync(p)) return {};
     try {
-      fromFile = parseDotEnv(fs.readFileSync(envPath, "utf8"));
+      return parseDotEnv(fs.readFileSync(p, "utf8"));
     } catch {
-      fromFile = {};
+      return {};
     }
-  }
+  };
+  const fromFile = { ...readFile(LEGACY_WEB_ENV_FILE), ...readFile(ROOT_ENV_FILE) };
   const get = (key, fallback = "") => process.env[key] ?? fromFile[key] ?? fallback;
   const port = Number.parseInt(get("PORT", "3000"), 10);
   return {
@@ -195,7 +203,7 @@ export function loadEnvConfig() {
     port: Number.isInteger(port) && port > 0 ? port : 3000,
     projectsFile: resolveProjectsFile(get("PROJECTS_FILE", "web/projects.json")),
     allowedOrigin: get("ALLOWED_ORIGIN", "").trim(),
-    envFile: path.join(WEB_DIR, ".env"),
+    envFile: ROOT_ENV_FILE,
   };
 }
 
@@ -294,6 +302,110 @@ function resolveStoredConfigPath(configPath) {
   const raw = String(configPath ?? "").trim();
   if (!raw) return null;
   return path.isAbsolute(raw) ? raw : path.join(REPO_ROOT, raw);
+}
+
+/**
+ * Filesystem + k8s-safe slug from a display name (DNS-1123 label style).
+ * Mirrors deriveProjectName(): lowercase, non [a-z0-9-] -> "-", collapse,
+ * trim dashes, cap at 63 chars, fallback to "project".
+ */
+export function slugifyProjectName(name) {
+  let slug = String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) slug = "project";
+  if (slug.length > 63) slug = slug.slice(0, 63).replace(/-+$/g, "") || "project";
+  return slug;
+}
+
+/** Folder holding auto-managed per-project configs: <globalDir>/projects. */
+export function managedProjectsDir() {
+  return path.join(globalConfigDir(), "projects");
+}
+
+/** Default config file for an auto-managed project slug. */
+export function defaultProjectConfigPath(slug) {
+  return path.join(managedProjectsDir(), slug, "config.yaml");
+}
+
+/**
+ * True when configPath lives inside the managed projects dir (i.e. it was
+ * auto-assigned, not a user-supplied custom path). Such paths follow renames.
+ */
+export function isManagedConfigPath(configPath) {
+  const resolved = path.resolve(String(configPath ?? ""));
+  const base = path.resolve(managedProjectsDir());
+  const rel = path.relative(base, resolved);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * Unique managed config path for a base slug. Suffixes -2, -3, ... while the
+ * candidate is taken by another registry entry (excluding excludeId) or an
+ * existing file on disk (e.g. leftovers from a removed entry).
+ */
+export function uniqueManagedConfigPath(projects, baseSlug, excludeId = null) {
+  const takenPaths = new Set(
+    (projects ?? [])
+      .filter((p) => p.id !== excludeId)
+      .map((p) => path.resolve(String(p.configPath ?? "")))
+  );
+  let slug = baseSlug;
+  let n = 1;
+  while (true) {
+    const candidate = defaultProjectConfigPath(slug);
+    const resolved = path.resolve(candidate);
+    if (!takenPaths.has(resolved) && !fs.existsSync(candidate)) return { slug, configPath: candidate };
+    n += 1;
+    slug = `${baseSlug}-${n}`;
+  }
+}
+
+/**
+ * Starter YAML for a new project, modelled on a realistic app + postgres
+ * sidecar setup. Interpolated values (slug + free NodePorts) validate;
+ * hosts/password are clearly-marked placeholders the user must edit.
+ */
+export function buildStarterYaml({ slug, mainNodePort, dbNodePort }) {
+  const safeSlug = slugifyProjectName(slug);
+  const main = Number.isInteger(mainNodePort) ? mainNodePort : 30022;
+  const db = Number.isInteger(dbNodePort) && dbNodePort !== main ? dbNodePort : 30432;
+  return `# Starter config for "${safeSlug}". Edit hosts/passwords, then Save.
+# Shared settings (registry, image build, k8s, nfs, ssh) come from the
+# global config; add keys here only for values that differ per project.
+
+project: ${safeSlug}
+
+k8s:
+  nodePort: ${main}
+  sidecars:
+    - name: postgres
+      image: postgres:18.6
+      env:
+        POSTGRES_USER: ${safeSlug}
+        POSTGRES_DB: ${safeSlug}
+        POSTGRES_PASSWORD: ${safeSlug}
+        POSTGRES_HOST_AUTH_METHOD: trust
+      ports:
+        - { containerPort: 5432, name: postgres, nodePort: ${db} }
+      volumeMounts: # persist the data on the NAS workspace
+        - name: workspace
+          mountPath: /var/lib/postgresql
+          subPath: postgres/${safeSlug}
+      resources:
+        requests: { cpu: 100m, memory: 128Mi }
+        limits: { cpu: "1", memory: 1Gi }
+
+# One Ingress rule per host, each routing to that port on this project's
+# service. Hosts must resolve (DNS) to your Traefik LoadBalancer IP.
+# These are placeholders — replace example.com with your own domain.
+web:
+  ports:
+    - { port: 3000, host: app-${safeSlug}.example.com }
+    - { port: 3001, host: api-${safeSlug}.example.com }
+`;
 }
 
 // ------------------------------------------------------ config redaction ---
@@ -510,6 +622,61 @@ export function configuredPorts(cfg) {
     })),
     nodeName: cfg?.k8s?.nodeName || null,
   };
+}
+
+/**
+ * Every NodePort this config wants: [{ nodePort, label }].
+ * Label says which setting it comes from (ssh / web port / sidecar).
+ */
+export function wantedNodePorts(cfg) {
+  const ports = configuredPorts(cfg);
+  const wanted = [];
+  if (Number.isInteger(ports.sshNodePort)) wanted.push({ nodePort: ports.sshNodePort, label: "ssh" });
+  for (const w of ports.web ?? []) {
+    if (Number.isInteger(w.nodePort)) wanted.push({ nodePort: w.nodePort, label: `web port ${w.port}` });
+  }
+  for (const s of ports.sidecars ?? []) {
+    if (Number.isInteger(s.nodePort)) wanted.push({ nodePort: s.nodePort, label: `sidecar ${s.name}` });
+  }
+  return wanted;
+}
+
+/**
+ * NodePorts this config wants that are already held by *other* services on
+ * the cluster. Ports held by the project's own Service (<project> in
+ * <namespace>) are ignored, so re-validating a deployed project doesn't flag
+ * itself. Pure: `live` is the result of getClusterPorts().
+ * Returns [{ nodePort, label, service, namespace }].
+ */
+export function findTakenNodePorts(cfg, live) {
+  const namespace = cfg?.k8s?.namespace;
+  const ownService = cfg?.project;
+  const livePorts = Array.isArray(live?.ports) ? live.ports : [];
+  const taken = [];
+  for (const w of wantedNodePorts(cfg)) {
+    const holder = livePorts.find(
+      (p) => p.nodePort === w.nodePort && !(p.namespace === namespace && p.service === ownService)
+    );
+    if (holder) taken.push({ ...w, service: holder.service, namespace: holder.namespace });
+  }
+  return taken;
+}
+
+/**
+ * NodePorts in `wanted` that are also claimed by other projects' saved
+ * configs (even inactive ones with nothing on the cluster).
+ * `others` is [{ name, wanted: [{ nodePort, label }] }].
+ * Returns [{ nodePort, label, project, projectLabel }].
+ */
+export function findClaimedNodePorts(wanted, others) {
+  const claimed = [];
+  for (const w of wanted ?? []) {
+    for (const o of others ?? []) {
+      const hit = (o.wanted ?? []).find((x) => x.nodePort === w.nodePort);
+      if (hit) claimed.push({ ...w, project: o.name, projectLabel: hit.label });
+    }
+  }
+  return claimed;
 }
 
 /**
@@ -1004,7 +1171,42 @@ export function createServer(env) {
       else res.end();
     });
   });
+  // Browser terminal sessions: ws(s)://<host>/api/ssh/<projectId>.
+  // Same session-cookie auth as the REST API; the target (namespace,
+  // service, key) comes from the project's saved config.
+  attachSshTerminal(server, {
+    isAuthenticated: (req) => Boolean(getSession(req)),
+    loadTarget: (projectId) => loadSshTarget(projectsFile, projectId),
+  });
   return server;
+}
+
+/**
+ * Resolve everything a browser terminal session needs for one project:
+ * the service to forward to plus the user/key to connect with.
+ * Throws (code NOT_FOUND for an unknown project).
+ */
+export function loadSshTarget(projectsFile, projectId) {
+  const project = findProject(projectsFile, projectId);
+  if (!project) {
+    throw Object.assign(new Error(`unknown project: ${projectId}`), { code: "NOT_FOUND" });
+  }
+  const loaded = loadProjectConfig(projectsFile, { projectId });
+  try {
+    const cfg = loaded.cfg;
+    const pair = ensureKeyPair(cfg.ssh.keyDirPath, cfg.ssh.keyName);
+    return {
+      name: project.name,
+      namespace: cfg.k8s.namespace,
+      service: cfg.project,
+      sshPort: cfg.ssh.port,
+      nodePort: cfg.k8s.nodePort,
+      user: cfg.ssh.user,
+      privateKey: pair.private,
+    };
+  } finally {
+    loaded.cleanup();
+  }
 }
 
 async function handleRequest(req, res, env, projectsFile) {
@@ -1141,17 +1343,20 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
         sendJson(res, 400, { error: "name is required" });
         return;
       }
-      if (!rawConfigPath) {
-        sendJson(res, 400, { error: "configPath is required" });
-        return;
-      }
-      const resolved = resolveStoredConfigPath(rawConfigPath);
-      if (!fs.existsSync(resolved)) {
-        sendJson(res, 400, { error: `config file not found: ${resolved}` });
-        return;
-      }
       const projects = readProjects(projectsFile);
-      const project = { id: newId(), name, configPath: resolved };
+      let configPath;
+      if (rawConfigPath) {
+        // Explicit custom path (advanced / backwards-compatible). The file
+        // itself may not exist yet — the user can create it via the Edit
+        // page textarea.
+        configPath = resolveStoredConfigPath(rawConfigPath);
+      } else {
+        // Name-only creation: auto-assign a unique managed path under the
+        // global projects dir. No file is created until the first config save.
+        const baseSlug = slugifyProjectName(name);
+        configPath = uniqueManagedConfigPath(projects, baseSlug).configPath;
+      }
+      const project = { id: newId(), name, configPath };
       projects.push(project);
       writeProjects(projectsFile, projects);
       sendJson(res, 201, { project });
@@ -1207,10 +1412,33 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
           sendJson(res, 400, { error: "configPath must not be empty" });
           return;
         }
-        // Store the resolved absolute path so the UI and jobs always
-        // operate on the same file. The file itself may not exist yet —
-        // the user can create it via the Edit page textarea.
+        // Explicit path change wins — no auto-move. The file itself may not
+        // exist yet (created via the Edit page textarea).
         projects[idx].configPath = resolveStoredConfigPath(rawConfigPath);
+      } else if (hasName) {
+        // Rename without an explicit path: managed configs follow the new
+        // slug. Custom paths stay put. Moves never overwrite.
+        const oldPath = projects[idx].configPath;
+        if (isManagedConfigPath(oldPath)) {
+          const baseSlug = slugifyProjectName(projects[idx].name);
+          const { configPath: nextPath } = uniqueManagedConfigPath(projects, baseSlug, projects[idx].id);
+          if (path.resolve(nextPath) !== path.resolve(oldPath)) {
+            if (fs.existsSync(nextPath)) {
+              sendJson(res, 400, { error: `config file already exists: ${nextPath}` });
+              return;
+            }
+            if (fs.existsSync(oldPath)) {
+              try {
+                fs.mkdirSync(path.dirname(nextPath), { recursive: true });
+                fs.renameSync(oldPath, nextPath);
+              } catch (err) {
+                sendJson(res, 500, { error: `cannot move config file: ${err.message}` });
+                return;
+              }
+            }
+            projects[idx].configPath = nextPath;
+          }
+        }
       }
       writeProjects(projectsFile, projects);
       sendJson(res, 200, { project: projects[idx] });
@@ -1229,6 +1457,43 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       return;
     }
     sendJson(res, 405, { error: "method not allowed" });
+    return;
+  }
+
+  // ---------------------------------------------------- project starter ----
+  if (method === "GET" && pathname === "/api/project-starter") {
+    const projectId = url.searchParams.get("projectId");
+    const rawName = url.searchParams.get("projectName");
+    let name = String(rawName ?? "").trim();
+    if (projectId) {
+      const project = findProject(projectsFile, projectId);
+      if (!project) {
+        sendJson(res, 404, { error: `unknown project: ${projectId}` });
+        return;
+      }
+      name = project.name;
+    }
+    if (!name) {
+      sendJson(res, 400, { error: "projectId or projectName is required" });
+      return;
+    }
+    const slug = slugifyProjectName(name);
+    let mainNodePort;
+    let dbNodePort;
+    try {
+      mainNodePort = allocateNodePort(30022);
+      dbNodePort = allocateNodePort(30432);
+      if (dbNodePort === mainNodePort) dbNodePort = allocateNodePort(mainNodePort + 1);
+    } catch (err) {
+      sendJson(res, 500, { error: `no free NodePort: ${err.message}` });
+      return;
+    }
+    sendJson(res, 200, {
+      slug,
+      mainNodePort,
+      dbNodePort,
+      yaml: buildStarterYaml({ slug, mainNodePort, dbNodePort }),
+    });
     return;
   }
 
@@ -1318,10 +1583,27 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     const globalPath = globalConfigPath();
     if (method === "GET") {
       const exists = fs.existsSync(globalPath);
+      // Effective system Dockerfile: image.dockerfile from the global layer
+      // (default "Dockerfile") resolved against the global dir.
+      let dockerfilePath = path.join(path.dirname(globalPath), "Dockerfile");
+      if (exists) {
+        try {
+          const parsed = yaml.load(fs.readFileSync(globalPath, "utf8")) ?? {};
+          const rel = parsed?.image?.dockerfile;
+          if (typeof rel === "string" && rel.trim()) {
+            dockerfilePath = path.isAbsolute(rel.trim())
+              ? rel.trim()
+              : path.join(path.dirname(globalPath), rel.trim());
+          }
+        } catch {
+          /* keep the default location */
+        }
+      }
       sendJson(res, 200, {
         exists,
         path: globalPath,
         rawYaml: exists ? fs.readFileSync(globalPath, "utf8") : null,
+        dockerfile: { path: dockerfilePath, exists: fs.existsSync(dockerfilePath) },
       });
       return;
     }
@@ -1378,7 +1660,51 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     }
     try {
       const { lines } = captureOutput(() => validate(loaded.cfg, { manifest: false }));
-      sendJson(res, 200, { ok: true, lines, summary: lines.join("\n") });
+      // Mention NodePorts already held by other services (warning only —
+      // validation still passes). Silent when the cluster is unreachable, so
+      // validation stays usable offline.
+      let portConflicts = [];
+      try {
+        portConflicts = findTakenNodePorts(loaded.cfg, getClusterPorts()).map((c) => ({
+          ...c,
+          source: "cluster",
+        }));
+      } catch {
+        portConflicts = [];
+      }
+      // Mention NodePorts claimed by other projects' saved configs, even when
+      // those projects are inactive (nothing on the cluster). Ports already
+      // reported as cluster-held are skipped to avoid double warnings.
+      const wanted = wantedNodePorts(loaded.cfg);
+      const others = [];
+      for (const p of readProjects(projectsFile)) {
+        if (p.id === params.projectId || !p.configPath) continue;
+        try {
+          const otherCfg = loadConfig(resolveStoredConfigPath(p.configPath));
+          others.push({ name: p.name, wanted: wantedNodePorts(otherCfg) });
+        } catch {
+          /* missing/unreadable/invalid file — its own page will flag it */
+        }
+      }
+      const claimedPorts = findClaimedNodePorts(wanted, others)
+        .filter((c) => !portConflicts.some((t) => t.nodePort === c.nodePort))
+        .map((c) => ({ ...c, source: "project" }));
+      lines.unshift(
+        ...portConflicts.map(
+          (c) =>
+            `warning: nodePort ${c.nodePort} (${c.label}) is already in use by service "${c.service}" in namespace "${c.namespace}"`
+        ),
+        ...claimedPorts.map(
+          (c) =>
+            `warning: nodePort ${c.nodePort} (${c.label}) is also claimed by project "${c.project}" in its saved config (for ${c.projectLabel})`
+        )
+      );
+      sendJson(res, 200, {
+        ok: true,
+        lines,
+        summary: lines.join("\n"),
+        portConflicts: [...portConflicts, ...claimedPorts],
+      });
     } catch (err) {
       sendJson(res, 200, { ok: false, error: err.message, lines: [], summary: "" });
     } finally {
@@ -1424,6 +1750,32 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       identityFile: e.identityFile ?? null,
     }));
     sendJson(res, 200, { entries });
+    return;
+  }
+
+  // -------------------------------------------------------- ssh terminal ----
+  // Connection summary for the browser terminal page. The live session
+  // itself runs over ws(s)://<host>/api/ssh/<projectId> (see ssh-terminal.js).
+  if (method === "GET" && pathname === "/api/ssh/info") {
+    const projectId = url.searchParams.get("projectId");
+    if (!projectId) {
+      sendJson(res, 400, { error: "projectId is required" });
+      return;
+    }
+    try {
+      const target = loadSshTarget(projectsFile, projectId);
+      sendJson(res, 200, {
+        project: { id: projectId, name: target.name },
+        user: target.user,
+        namespace: target.namespace,
+        service: target.service,
+        sshPort: target.sshPort,
+        nodePort: target.nodePort,
+      });
+    } catch (err) {
+      sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, { error: err.message });
+      return;
+    }
     return;
   }
 

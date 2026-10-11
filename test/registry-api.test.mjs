@@ -33,7 +33,16 @@ before(async () => {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ name: "foo/bar", tags: ["t3"] }));
     }
-    if (req.method === "DELETE" && url.pathname.startsWith("/v2/foo/bar/tags/")) {
+    if (req.method === "GET" && url.pathname.startsWith("/v2/foo/bar/manifests/")) {
+      if (!ok) { res.writeHead(401, { "WWW-Authenticate": challenge }); return res.end(); }
+      const tag = decodeURIComponent(url.pathname.split("/").pop());
+      res.writeHead(200, {
+        "Content-Type": "application/vnd.docker.distribution.manifest.v2+json",
+        "Docker-Content-Digest": `sha256:${tag}-digest`,
+      });
+      return res.end(JSON.stringify({}));
+    }
+    if (req.method === "DELETE" && url.pathname.startsWith("/v2/foo/bar/manifests/")) {
       if (!ok) { res.writeHead(401, { "WWW-Authenticate": challenge }); return res.end(); }
       deleted.push(decodeURIComponent(url.pathname.split("/").pop()));
       res.writeHead(202);
@@ -85,7 +94,7 @@ test("listTags: authenticates and follows pagination", async () => {
 
 test("deleteTag: issues an authenticated DELETE", async () => {
   await deleteTag(cfg, "t1");
-  assert.deepEqual(deleted, ["t1"]);
+  assert.deepEqual(deleted, ["sha256:t1-digest"]);
 });
 
 test("listTags: registry sending Bearer and Basic challenges in one header (Gitea)", async () => {

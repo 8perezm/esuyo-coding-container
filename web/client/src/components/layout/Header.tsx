@@ -23,7 +23,7 @@ export function Header({ theme, onToggleTheme, onOpenSidebar }: HeaderProps) {
         >
           <Menu size={22} aria-hidden="true" />
         </button>
-        <Link to="/" className="brand" data-ref="header-brand-link">
+        <Link to="/" className="brand" data-ref="header-brand-link" style={{ fontSize: 'var(--font-size-4xl)' }}>
           Coding Containers
         </Link>
       </div>

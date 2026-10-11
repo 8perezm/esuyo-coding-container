@@ -7,7 +7,7 @@
  * `npm run dev` already stops its children on Ctrl+C, but orphaned servers
  * (closed terminal, crashed launcher) keep holding their ports and the next
  * `npm run dev` fails with EADDRINUSE. This kills whatever is LISTENING on
- * the Vite port (:3000) and the API port (:PORT from web/.env, default 3001).
+ * the Vite port (:3000) and the API port (:PORT from .env, default 3001).
  *
  *   node web/kill-dev.js --dry-run    # only list what would be killed
  *   node web/kill-dev.js --ports=3000 # only check the given port(s)
@@ -25,17 +25,20 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 
 const WEB_DIR = path.dirname(fileURLToPath(import.meta.url));
-const ENV_PATH = path.join(WEB_DIR, ".env");
+const ENV_PATH = path.join(WEB_DIR, "..", ".env");
+const LEGACY_ENV_PATH = path.join(WEB_DIR, ".env");
 const VITE_PORT = 3000;
 const DEFAULT_API_PORT = 3001;
 
 function readApiPort() {
-  try {
-    const env = fs.readFileSync(ENV_PATH, "utf8");
-    const match = env.match(/^PORT=(\d+)\s*$/m);
-    if (match) return Number(match[1]);
-  } catch {
-    /* missing/unreadable .env — fall through to the default */
+  for (const p of [ENV_PATH, LEGACY_ENV_PATH]) {
+    try {
+      const env = fs.readFileSync(p, "utf8");
+      const match = env.match(/^PORT=(\d+)\s*$/m);
+      if (match) return Number(match[1]);
+    } catch {
+      /* missing/unreadable .env — try the next candidate */
+    }
   }
   return DEFAULT_API_PORT;
 }

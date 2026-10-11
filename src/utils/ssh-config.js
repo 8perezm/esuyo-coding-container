@@ -11,11 +11,29 @@ export function sshConfigPath() {
   return path.join(os.homedir(), ".ssh", "config");
 }
 
+import { sshPrefix } from "./instance.js";
+
 /**
- * Alias convention for container hosts: coding-<project>.
+ * Alias convention for container hosts: <prefix><project> (default
+ * "coding-<project>"; CODING_SSH_PREFIX in PROJECT_FOLDER/.env overrides
+ * the prefix so dev/prod copies don't overwrite each other's aliases).
  */
 export function sshAlias(project) {
-  return `coding-${project}`;
+  return `${sshPrefix()}${project}`;
+}
+
+/**
+ * Inverse of sshAlias(): strip this instance's prefix. Returns null when the
+ * alias belongs to a sibling instance sharing the same managed block, so
+ * `list update` leaves other copies' aliases untouched (each copy manages
+ * only its own entries; the sibling's own runs update those).
+ */
+export function sshProjectFromAlias(alias) {
+  const prefix = sshPrefix();
+  if (alias.startsWith(prefix) && alias.length > prefix.length) {
+    return alias.slice(prefix.length);
+  }
+  return null;
 }
 
 /**
@@ -64,7 +82,9 @@ function readManaged(file) {
   const entries = {};
   let current = null;
   for (const line of lines.slice(bi + 1, ei)) {
-    const m = line.match(/^Host (coding-[a-z0-9-]+)\s*$/);
+    // Shared managed block: accept any Host alias inside the markers so
+    // sibling instances (different CODING_SSH_PREFIX) coexist.
+    const m = line.match(/^Host ([A-Za-z0-9._-]+)\s*$/);
     if (m) {
       current = m[1];
       entries[current] = [line];
