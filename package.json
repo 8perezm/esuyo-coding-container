@@ -1,6 +1,6 @@
 {
   "name": "@esuyo/coding-container",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "CLI to build, publish and deploy SSH-accessible coding containers on k3s",
   "type": "module",
   "bin": {
