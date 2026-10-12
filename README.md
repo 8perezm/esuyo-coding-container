@@ -1,6 +1,6 @@
 ![coding-container — Standardized, isolated coding environments.](./docs/intro-image.jpg)
 
-# Esuyo coding-container
+# coding-container
 
 > Ready-to-code containers on your Kubernetes cluster — per project, over SSH, with workspaces that survive restarts.
 
