@@ -10,6 +10,10 @@
 
 appId: com.esuyo.coding-container
 productName: Esuyo Coding Container
+# Explicit binary name: the npm package name (@esuyo/...) contains a scope
+# that electron-builder would otherwise derive an illegal executable name
+# from (AppImage/mac builds reject the `@`).
+executableName: esuyo-coding-container
 
 directories:
   output: dist
@@ -121,6 +125,8 @@ linux:
     - deb
   category: Development
   maintainer: Esuyo
+  # Reverse-DNS id so taskbars/docks associate the window with its launcher.
+  desktopName: com.esuyo.coding-container
 
 publish:
   provider: github
