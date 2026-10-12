@@ -59,7 +59,7 @@ Browser UI (from source):
 ```sh
 npm --prefix web/client install   # first time only
 copy .env.example .env            # Windows (cp on macOS/Linux) — then set ADMIN_EMAIL + ADMIN_PASSWORD
-node web/dev.js                   # pages on :3000, API on the .env PORT
+node web/dev.js                   # pages on :3400, API on the .env PORT
 ```
 
 Production build: `npm --prefix web/client run build`, then `node web/server/server.js` serves the pages and the API on one port. See [Web GUI](./docs/gui.md).

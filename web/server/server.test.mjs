@@ -11,8 +11,13 @@ import {
   captureOutput,
   configuredPorts,
   createServer,
+  defaultAuthFile,
   findClaimedNodePorts,
   findTakenNodePorts,
+  getEffectiveAuth,
+  isLoopbackReq,
+  migrateLegacyToAuthFile,
+  readAuthRecord,
   getWorkloadsStatus,
   isManagedConfigPath,
   managedProjectsDir,
@@ -26,7 +31,10 @@ import {
   trimLogs,
   uniqueManagedConfigPath,
   updateEnvFilePassword,
+  validateAuthInput,
   validatePasswordChange,
+  verifyAuthPassword,
+  writeAuthRecord,
 } from "./server.js";
 
 test("parseDotEnv: values, comments, quotes, empty lines", () => {
@@ -377,7 +385,8 @@ test("http: change-password updates login and persists to env file", async () =>
     });
     assert.equal(short.status, 400);
 
-    // Correct change succeeds, persists, and drops the other session.
+    // Correct change succeeds, migrates to the hash file (no plaintext left
+    // in .env), and drops the other session.
     const changed = await fetch(`${base}/api/change-password`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: first.cookie },
@@ -385,7 +394,13 @@ test("http: change-password updates login and persists to env file", async () =>
     });
     assert.equal(changed.status, 200);
     assert.deepEqual(await changed.json(), { ok: true, persisted: true });
-    assert.match(fs.readFileSync(envFile, "utf8"), /ADMIN_PASSWORD=brandnew99/);
+    const afterRaw = fs.readFileSync(envFile, "utf8");
+    assert.ok(!/ADMIN_PASSWORD=/.test(afterRaw), "plaintext password must leave .env");
+    const record = readAuthRecord(env.authFile ?? defaultAuthFile(path.join(tmp, "projects.json")));
+    assert.ok(record);
+    assert.equal(record.email, "admin@example.com");
+    assert.ok(verifyAuthPassword(record, "brandnew99"));
+    assert.ok(!verifyAuthPassword(record, "oldpass99"));
     assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: second.cookie } })).status, 401);
     assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: first.cookie } })).status, 200);
 
@@ -869,4 +884,101 @@ test("http: name-only create assigns managed path; rename moves file; starter wo
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prevXdg;
   }
+});
+
+test("auth store: hash verifies, wrong password fails, input validated", () => {
+  assert.equal(validateAuthInput("not-an-email", "longenough1"), "Enter a valid email address.");
+  assert.equal(validateAuthInput("a@b.c", "short"), "Password must be at least 8 characters.");
+  assert.equal(validateAuthInput("a@b.c", "longenough1"), null);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-auth-"));
+  const file = path.join(tmp, "auth.json");
+  writeAuthRecord(file, "admin@example.com", "s3cret-password");
+  const raw = fs.readFileSync(file, "utf8");
+  assert.ok(!raw.includes("s3cret-password"), "hash file must not contain plaintext");
+  const record = readAuthRecord(file);
+  assert.equal(record.email, "admin@example.com");
+  assert.ok(verifyAuthPassword(record, "s3cret-password"));
+  assert.ok(!verifyAuthPassword(record, "wrong-password"));
+});
+
+test("auth store: loopback detection", () => {
+  assert.equal(isLoopbackReq({ socket: { remoteAddress: "127.0.0.1" } }), true);
+  assert.equal(isLoopbackReq({ socket: { remoteAddress: "::1" } }), true);
+  assert.equal(isLoopbackReq({ socket: { remoteAddress: "::ffff:127.0.0.1" } }), true);
+  assert.equal(isLoopbackReq({ socket: { remoteAddress: "10.0.0.5" } }), false);
+  assert.equal(isLoopbackReq({ socket: {} }), false);
+});
+
+test("http: auth-status + register + delete-to-reset", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-register-"));
+  const env = {
+    adminEmail: "",
+    adminPassword: "",
+    port: 0,
+    projectsFile: path.join(tmp, "projects.json"),
+    authFile: path.join(tmp, "auth.json"),
+    allowedOrigin: "",
+    envFile: path.join(tmp, ".env"),
+  };
+  const server = createServer(env);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const status = await (await fetch(`${base}/api/auth-status`)).json();
+    assert.equal(status.registered, false);
+
+    const badEmail = await fetch(`${base}/api/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "nope", password: "longenough1" }),
+    });
+    assert.equal(badEmail.status, 400);
+
+    const created = await fetch(`${base}/api/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "owner@example.com", password: "register99" }),
+    });
+    assert.equal(created.status, 201);
+    const cookie = (created.headers.get("set-cookie") ?? "").split(";")[0];
+    assert.match(cookie, /gui_session=/);
+
+    assert.equal((await (await fetch(`${base}/api/auth-status`)).json()).registered, true);
+    const secondRegister = await fetch(`${base}/api/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "other@example.com", password: "register99" }),
+    });
+    assert.equal(secondRegister.status, 409);
+
+    assert.equal((await fetch(`${base}/api/me`, { headers: { cookie } })).status, 200);
+
+    // Delete-to-reset: removing the file voids sessions and flips status.
+    fs.unlinkSync(env.authFile);
+    assert.equal((await fetch(`${base}/api/me`, { headers: { cookie } })).status, 401);
+    assert.equal((await (await fetch(`${base}/api/auth-status`)).json()).registered, false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("auth store: legacy .env migrates to hash and strips plaintext", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-migrate-"));
+  const envFile = path.join(tmp, ".env");
+  fs.writeFileSync(envFile, "ADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=oldpass99\nPORT=3401\n");
+  const env = {
+    adminEmail: "admin@example.com",
+    adminPassword: "oldpass99",
+    port: 0,
+    projectsFile: path.join(tmp, "projects.json"),
+    authFile: path.join(tmp, "auth.json"),
+    allowedOrigin: "",
+    envFile,
+  };
+  assert.equal(migrateLegacyToAuthFile(env), true);
+  assert.ok(!/ADMIN_PASSWORD=/.test(fs.readFileSync(envFile, "utf8")));
+  const record = readAuthRecord(env.authFile);
+  assert.equal(record.email, "admin@example.com");
+  assert.ok(verifyAuthPassword(record, "oldpass99"));
+  assert.equal(getEffectiveAuth(env).type, "file");
 });

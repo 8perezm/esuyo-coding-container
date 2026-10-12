@@ -37,7 +37,7 @@ node web/dev.js                   # backend API + Vite frontend together
 node web/kill-dev.js              # kill orphaned dev servers holding the dev ports
 ```
 
-Dev URLs: the frontend on `:3000`, the API on the `.env` `PORT` (default `3001`); Vite proxies `/api` (including terminal websockets) at the API. Production: `npm --prefix web/client run build` emits `web/client/dist/`, and `node web/server/server.js` (same `.env`) serves the API + the built SPA on one port. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` + `ADMIN_PASSWORD` first, or sign-in always fails. The dev launcher warns when `.env` is missing and refuses to start when `web/client/node_modules` is absent.
+Dev URLs: the frontend on `:3400`, the API on the `.env` `PORT` (default `3401`); Vite proxies `/api` (including terminal websockets) at the API. Production: `npm --prefix web/client run build` emits `web/client/dist/`, and `node web/server/server.js` (same `.env`) serves the API + the built SPA on one port. Copy `.env.example` to `.env` first; the first launch migrates a legacy `ADMIN_EMAIL` + `ADMIN_PASSWORD` into the hashed credential file, afterwards the Sign in page asks to create the account on the local machine when none exists. The dev launcher warns when `.env` is missing and refuses to start when `web/client/node_modules` is absent.
 
 ## Run the desktop app from source
 

@@ -7,10 +7,10 @@
  * `npm run dev` already stops its children on Ctrl+C, but orphaned servers
  * (closed terminal, crashed launcher) keep holding their ports and the next
  * `npm run dev` fails with EADDRINUSE. This kills whatever is LISTENING on
- * the Vite port (:3000) and the API port (:PORT from .env, default 3001).
+ * the Vite port (:3400) and the API port (:PORT from .env, default 3401).
  *
  *   node web/kill-dev.js --dry-run    # only list what would be killed
- *   node web/kill-dev.js --ports=3000 # only check the given port(s)
+ *   node web/kill-dev.js --ports=3400 # only check the given port(s)
  *
  * Zero dependencies (node: builtins only). Windows-first (netstat/taskkill),
  * with an lsof/kill fallback for macOS/Linux.
@@ -27,8 +27,8 @@ const execFileAsync = promisify(execFile);
 const WEB_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = path.join(WEB_DIR, "..", ".env");
 const LEGACY_ENV_PATH = path.join(WEB_DIR, ".env");
-const VITE_PORT = 3000;
-const DEFAULT_API_PORT = 3001;
+const VITE_PORT = 3400;
+const DEFAULT_API_PORT = 3401;
 
 function readApiPort() {
   for (const p of [ENV_PATH, LEGACY_ENV_PATH]) {

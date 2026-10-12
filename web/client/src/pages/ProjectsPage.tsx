@@ -71,25 +71,30 @@ export function ProjectsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .get<WorkloadsResponse>('/api/cluster/workloads')
-      .then((data) => {
-        if (cancelled) return;
-        const workloads = data.workloads ?? [];
-        setDeployedIds(
-          new Set(workloads.filter((w) => w.deployed && w.projectId).map((w) => w.projectId as string)),
-        );
-        const images: Record<string, string> = {};
-        for (const w of workloads) {
-          if (w.projectId && w.image) images[w.projectId] = w.image;
-        }
-        setWorkloadImages(images);
-      })
-      .catch(() => {
-        if (!cancelled) setDeployedIds(new Set());
-      });
+    const loadWorkloads = () => {
+      api
+        .get<WorkloadsResponse>('/api/cluster/workloads')
+        .then((data) => {
+          if (cancelled) return;
+          const workloads = data.workloads ?? [];
+          setDeployedIds(
+            new Set(workloads.filter((w) => w.deployed && w.projectId).map((w) => w.projectId as string)),
+          );
+          const images: Record<string, string> = {};
+          for (const w of workloads) {
+            if (w.projectId && w.image) images[w.projectId] = w.image;
+          }
+          setWorkloadImages(images);
+        })
+        .catch(() => {
+          if (!cancelled) setDeployedIds(new Set());
+        });
+    };
+    loadWorkloads();
+    const timer = window.setInterval(loadWorkloads, 15000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 

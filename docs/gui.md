@@ -14,14 +14,14 @@ node web/dev.js          # development: API + live-reload frontend together
 node web/kill-dev.js     # stop orphaned dev servers still holding the dev ports
 ```
 
-Development addresses: the pages on `:3000`, the API on the `.env` `PORT` (default `3001`); the dev frontend proxies `/api` (including terminal sessions) to the API. Production is a single port:
+Development addresses: the pages on `:3400`, the API on the `.env` `PORT` (default `3401`); the dev frontend proxies `/api` (including terminal sessions) to the API. Production is a single port:
 
 ```sh
 npm --prefix web/client run build   # emit web/client/dist/
 node web/server/server.js           # serve the API + the built pages (reads root .env)
 ```
 
-Without a built client, `/` answers `{"message":"GUI not built"}`. Sign-in uses `ADMIN_EMAIL` + `ADMIN_PASSWORD` from the root `.env` (a legacy `web/.env` still fills in missing keys); sessions last 12 hours via an `HttpOnly` cookie. The Profile page changes the password (minimum 8 characters) and writes it back to `.env`, signing out other browsers.
+Without a built client, `/` answers `{"message":"GUI not built"}`. Sign-in uses a single account stored as a hash in `auth.json` next to the projects registry (`AUTH_FILE` overrides; a legacy `web/.env` still fills in missing keys). The first launch migrates a legacy `ADMIN_EMAIL`/`ADMIN_PASSWORD` from the root `.env` into that file and removes the plaintext password line. When no account exists, the Sign in page becomes a Create your sign-in page on the computer where the app is running (`/register` works the same); over the network it explains that registration is not allowed remotely. Sessions last 12 hours via an `HttpOnly` cookie. The Profile page changes the password (minimum 8 characters), re-hashes it, and signs out other browsers; its Reset sign-in section tells where the credential file lives — deleting it while the app runs asks to create a new sign-in.
 
 ## Pages
 
@@ -49,8 +49,9 @@ Single environment file (repo-root `.env`):
 
 | Key | Purpose | Default |
 |---|---|---|
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | sign-in | — (sign-in fails until set) |
-| `PORT` | API (+ pages in production) port | `3001` in `.env.example` (`3000` code fallback) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | legacy first sign-in (migrated into the hashed credential file on startup, then ignored) | — |
+| `AUTH_FILE` | credential file override (absolute, or relative to the repo root) | `auth.json` next to the projects registry |
+| `PORT` | API (+ pages in production) port | `3401` in `.env.example` (`3401` code fallback) |
 | `PROJECTS_FILE` | registry override (absolute, or relative to the repo root) | `projects.json` next to the global config |
 | `ALLOWED_ORIGIN` | optional single-origin CORS for `/api/*` | — |
 

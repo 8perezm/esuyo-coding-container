@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError, api } from '../lib/api';
 import { Button, Card, Input, Label, PageHeader } from '../components/ui';
@@ -25,6 +25,22 @@ export function ProfilePage() {
   const [passwordWarning, setPasswordWarning] = useState<string | null>(null);
   const [passwordDone, setPasswordDone] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [authFile, setAuthFile] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ email: string; authFile: string | null }>('/api/auth-info')
+      .then((info) => {
+        if (!cancelled) setAuthFile(info.authFile);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthFile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onSubmitProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,8 +80,7 @@ export function ProfilePage() {
         <section>
           <h2 data-ref="page-profile-heading-profile" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 12 }}>
             Display name
-          </h2>
-          <Card data-ref="page-profile-card">
+          </h2>          <Card data-ref="page-profile-card">
             <p style={{ margin: '0 0 16px', fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-profile-info">
               Signed in as <strong style={{ color: 'var(--text-primary)' }}>{user?.email}</strong>. The display name is
               stored locally in this browser only.
@@ -165,6 +180,19 @@ export function ProfilePage() {
                 </div>
               </form>
             )}
+          </Card>
+        </section>
+
+        <section>
+          <h2 data-ref="page-profile-reset-heading" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 12 }}>
+            Reset sign-in
+          </h2>
+          <Card data-ref="page-profile-reset-card">
+            <p style={{ margin: '0 0 8px', fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-profile-reset-info">
+              To start over, delete the credential file{authFile ? ` at ${authFile}` : ''} while the app is running.
+              The pages will ask to create a new sign-in. Creating a sign-in is only possible on the computer where
+              the app is running.
+            </p>
           </Card>
         </section>
       </div>

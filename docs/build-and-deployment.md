@@ -21,7 +21,7 @@ npm --prefix web/client install   # first time only
 npm --prefix web/client run build # tsc + vite build → web/client/dist/
 ```
 
-The backend serves `web/client/dist/` (SPA fallback to `index.html`); without it `/` answers `{"message":"GUI not built"}`. Dev needs no build: `node web/dev.js` runs the API plus Vite (`:3000`, proxying `/api` at the API target) together.
+The backend serves `web/client/dist/` (SPA fallback to `index.html`); without it `/` answers `{"message":"GUI not built"}`. Dev needs no build: `node web/dev.js` runs the API plus Vite (`:3400`, proxying `/api` at the API target) together.
 
 ## Desktop installers
 

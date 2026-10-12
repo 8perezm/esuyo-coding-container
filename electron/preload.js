@@ -10,7 +10,7 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
-const AUTH_PATHS = new Set(["/api/login", "/api/logout", "/api/change-password"]);
+const AUTH_PATHS = new Set(["/api/login", "/api/register", "/api/logout", "/api/change-password"]);
 
 function pathnameOf(input) {
   try {
@@ -45,7 +45,7 @@ function reportAuthRequest(pathname, payload) {
     if (pathname === "/api/logout") {
       ipcRenderer.send("desktop:auth-logged-out");
     } else if (
-      pathname === "/api/login" &&
+      (pathname === "/api/login" || pathname === "/api/register") &&
       payload &&
       typeof payload.email === "string" &&
       typeof payload.password === "string"

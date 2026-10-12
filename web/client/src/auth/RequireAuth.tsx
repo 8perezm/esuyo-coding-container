@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Input, Label } from '../components/ui';
@@ -24,27 +24,63 @@ export function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, register, authStatus } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ registered: boolean; canRegister: boolean } | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    authStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStatusLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim(), password);
+      const unregistered = status && !status.registered;
+      if (unregistered && status.canRegister) {
+        await register(email.trim(), password);
+      } else {
+        await login(email.trim(), password);
+      }
       const params = new URLSearchParams(window.location.search);
       navigate(params.get('next') || '/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : 'Request failed');
     } finally {
       setBusy(false);
     }
   };
+
+  const unregistered = status && !status.registered;
+  const showRegister = Boolean(unregistered && status.canRegister);
+  const showBlocked = Boolean(unregistered && !status.canRegister);
+
+  const title = showRegister ? 'Create your sign-in' : showBlocked ? 'Setup required' : 'Sign in';
+  const subtitle = showRegister
+    ? 'No sign-in exists yet — create one on this computer.'
+    : showBlocked
+      ? 'Registration over the network is not allowed.'
+      : 'Administration console — internal use only.';
+  const submitLabel = statusLoading ? 'Loading…' : showRegister ? 'Create sign-in' : busy ? 'Signing in…' : 'Sign in';
 
   return (
     <div
@@ -62,10 +98,16 @@ export function LoginPage() {
         <p className="brand" style={{ marginBottom: 4 }} data-ref="login-brand">
           Coding Containers
         </p>
-        <h1 style={{ fontSize: 'var(--font-size-3xl)', marginBottom: 4 }} data-ref="login-title">Sign in</h1>
+        <h1 style={{ fontSize: 'var(--font-size-3xl)', marginBottom: 4 }} data-ref="login-title">{title}</h1>
         <p style={{ margin: '0 0 20px', fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="login-subtitle">
-          Administration console — internal use only.
+          {subtitle}
         </p>
+        {showBlocked ? (
+          <p style={{ margin: '0 0 12px', fontSize: 'var(--font-size-md)' }} data-ref="register-blocked">
+            No sign-in exists yet. Open the app on the computer where it is running to create it — registration is
+            not allowed over the network.
+          </p>
+        ) : (
         <form onSubmit={onSubmit} noValidate={false} data-ref="login-form">
           <div style={{ marginBottom: 12 }} data-ref="login-email-field">
             <Label htmlFor="login-email">Email</Label>
@@ -85,8 +127,9 @@ export function LoginPage() {
             <Input
               id="login-password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={showRegister ? 'new-password' : 'current-password'}
               required
+              minLength={showRegister ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
@@ -98,11 +141,16 @@ export function LoginPage() {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={busy} style={{ width: '100%' }} data-ref="login-submit">
-            {busy ? 'Signing in…' : 'Sign in'}
+          <Button type="submit" disabled={busy || statusLoading} style={{ width: '100%' }} data-ref="login-submit">
+            {submitLabel}
           </Button>
         </form>
+        )}
       </Card>
     </div>
   );
+}
+
+export function RegisterPage() {
+  return <LoginPage />;
 }

@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
-import { LoginPage, RequireAuth } from './auth/RequireAuth';
+import { LoginPage, RegisterPage, RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/layout/Layout';
 import { Spinner } from './components/ui';
 import { ProjectsProvider } from './lib/projects';
@@ -30,6 +30,7 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route
             path="/"
             element={

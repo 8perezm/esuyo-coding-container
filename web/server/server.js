@@ -210,12 +210,19 @@ export function loadEnvConfig() {
   };
   const fromFile = { ...readFile(LEGACY_WEB_ENV_FILE), ...readFile(ROOT_ENV_FILE) };
   const get = (key, fallback = "") => process.env[key] ?? fromFile[key] ?? fallback;
-  const port = Number.parseInt(get("PORT", "3000"), 10);
+  const port = Number.parseInt(get("PORT", "3401"), 10);
+  const projectsFile = resolveProjectsFile(get("PROJECTS_FILE", ""));
+  const authRaw = get("AUTH_FILE", "").trim();
   return {
     adminEmail: get("ADMIN_EMAIL", ""),
     adminPassword: get("ADMIN_PASSWORD", ""),
-    port: Number.isInteger(port) && port > 0 ? port : 3000,
-    projectsFile: resolveProjectsFile(get("PROJECTS_FILE", "")),
+    port: Number.isInteger(port) && port > 0 ? port : 3401,
+    projectsFile,
+    authFile: authRaw
+      ? path.isAbsolute(authRaw)
+        ? authRaw
+        : path.join(REPO_ROOT, authRaw)
+      : defaultAuthFile(projectsFile),
     allowedOrigin: get("ALLOWED_ORIGIN", "").trim(),
     envFile: ROOT_ENV_FILE,
   };
@@ -270,6 +277,155 @@ function getSession(req) {
 
 function sessionCookieHeader(token, maxAge) {
   return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax`;
+}
+
+// ------------------------------------------------------------ auth store ---
+// Single-user credential, hash at rest. Lives next to the projects registry
+// (per-machine, gitignored): <dir-of-projectsFile>/auth.json by default,
+// AUTH_FILE overrides. Shape: { email, salt, hash, N, r, p, keylen } with
+// node:crypto scrypt. Deleting the file resets to unregistered.
+
+export const AUTH_SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
+
+export function defaultAuthFile(projectsFile) {
+  const base = projectsFile ? path.dirname(projectsFile) : os.tmpdir();
+  return path.join(base, "auth.json");
+}
+
+/** Validate registration / email+password input; returns an error or null. */
+export function validateAuthInput(email, password) {
+  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+    return "Enter a valid email address.";
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    return "Password must be at least 8 characters.";
+  }
+  return null;
+}
+
+export function hashAuthPassword(password, saltHex) {
+  const salt = saltHex ?? crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(String(password), Buffer.from(salt, "hex"), AUTH_SCRYPT.keylen, {
+    N: AUTH_SCRYPT.N,
+    r: AUTH_SCRYPT.r,
+    p: AUTH_SCRYPT.p,
+  });
+  return {
+    salt,
+    hash: derived.toString("hex"),
+    N: AUTH_SCRYPT.N,
+    r: AUTH_SCRYPT.r,
+    p: AUTH_SCRYPT.p,
+    keylen: AUTH_SCRYPT.keylen,
+  };
+}
+
+export function verifyAuthPassword(record, password) {
+  try {
+    if (!record || typeof record.salt !== "string" || typeof record.hash !== "string") return false;
+    if (typeof password !== "string" || !password) return false;
+    const N = Number(record.N) || AUTH_SCRYPT.N;
+    const r = Number(record.r) || AUTH_SCRYPT.r;
+    const p = Number(record.p) || AUTH_SCRYPT.p;
+    const keylen = Number(record.keylen) || AUTH_SCRYPT.keylen;
+    const derived = crypto.scryptSync(String(password), Buffer.from(record.salt, "hex"), keylen, {
+      N,
+      r,
+      p,
+    });
+    const expected = Buffer.from(record.hash, "hex");
+    return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+export function readAuthRecord(authFile) {
+  try {
+    if (!authFile || !fs.existsSync(authFile)) return null;
+    const data = JSON.parse(fs.readFileSync(authFile, "utf8"));
+    if (!data || typeof data.email !== "string" || !data.email.trim()) return null;
+    if (typeof data.salt !== "string" || typeof data.hash !== "string") return null;
+    return { ...data, email: data.email.trim() };
+  } catch {
+    return null;
+  }
+}
+
+export function writeAuthRecord(authFile, email, password) {
+  const invalid = validateAuthInput(email, password);
+  if (invalid) throw new Error(invalid);
+  const cleanEmail = String(email).trim();
+  const sealed = { email: cleanEmail, ...hashAuthPassword(password) };
+  fs.mkdirSync(path.dirname(authFile), { recursive: true });
+  fs.writeFileSync(authFile, `${JSON.stringify(sealed, null, 2)}\n`, { mode: 0o600 });
+  try {
+    fs.chmodSync(authFile, 0o600);
+  } catch {
+    // Best effort (Windows ACLs may ignore mode bits).
+  }
+  return sealed;
+}
+
+/** Remove plaintext ADMIN_PASSWORD lines from a .env file (migration cleanup). */
+export function stripEnvPasswordLine(envFile) {
+  try {
+    if (!envFile || !fs.existsSync(envFile)) return false;
+    const raw = fs.readFileSync(envFile, "utf8");
+    const lines = String(raw).split(/\r?\n/);
+    const next = lines.filter((line) => !/^\s*ADMIN_PASSWORD\s*=/.test(line));
+    if (next.length === lines.length) return false;
+    fs.writeFileSync(envFile, `${next.join("\n").replace(/\n+$/, "\n")}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Effective credential: the auth file wins; otherwise legacy
+ * ADMIN_EMAIL/ADMIN_PASSWORD from env/.env. Returns
+ * { type: "file", record } | { type: "legacy", email } | { type: "none" }.
+ */
+export function getEffectiveAuth(env) {
+  const record = readAuthRecord(env?.authFile);
+  if (record) return { type: "file", record };
+  const email = String(env?.adminEmail ?? "").trim();
+  const password = env?.adminPassword ?? "";
+  if (email && typeof password === "string" && password) return { type: "legacy", email };
+  return { type: "none" };
+}
+
+/** True when the request arrived over loopback (registration allowed). */
+export function isLoopbackReq(req) {
+  const raw = req?.socket?.remoteAddress ?? "";
+  const normalized = String(raw).replace(/^::ffff:/i, "").toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+export function clearAllSessions() {
+  sessions.clear();
+}
+
+/**
+ * One-time migration: legacy ADMIN_EMAIL/ADMIN_PASSWORD -> hashed auth file.
+ * Strips the plaintext password line from .env on success (best effort).
+ * Returns true when a record now exists (already had one or just migrated).
+ */
+export function migrateLegacyToAuthFile(env) {
+  try {
+    if (readAuthRecord(env?.authFile)) return true;
+    const email = String(env?.adminEmail ?? "").trim();
+    const password = env?.adminPassword ?? "";
+    if (!email || typeof password !== "string" || !password) return false;
+    if (validateAuthInput(email, password)) return false;
+    writeAuthRecord(env.authFile, email, password);
+    stripEnvPasswordLine(env.envFile);
+    if (env) env.adminPassword = "";
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ------------------------------------------------------- projects registry ---
@@ -508,6 +664,54 @@ export function kubectlJson(kubectlArgs) {
   return JSON.parse(out || "{}");
 }
 
+// ------------------------------------------------------- cluster cache ---
+// Short-TTL in-memory cache so the dashboard's parallel page requests
+// (nodes + ports + workloads fired at once, polling every 15s) share one
+// set of kubectl results instead of spawning dozens of processes per load.
+// Only successful snapshots are cached; kubectl failures retry next time.
+
+export const CLUSTER_CACHE_TTL_MS = (() => {
+  const raw = Number.parseInt(process.env.CLUSTER_CACHE_TTL_MS ?? "", 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 5000;
+})();
+
+const clusterCache = new Map();
+
+export function clearClusterCache() {
+  clusterCache.clear();
+}
+
+function readClusterCache(key) {
+  const hit = clusterCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    clusterCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writeClusterCache(key, value) {
+  clusterCache.set(key, { expiresAt: Date.now() + CLUSTER_CACHE_TTL_MS, value });
+}
+
+/** Cache a cluster snapshot loader. Loader must return (not throw). */
+export function getCachedCluster(key, loader) {
+  const hit = readClusterCache(key);
+  if (hit !== null) return hit;
+  const value = loader();
+  writeClusterCache(key, value);
+  return value;
+}
+
+function projectsFingerprint(projects) {
+  try {
+    return (projects ?? []).map((p) => `${p?.id ?? ""}:${p?.configPath ?? ""}`).join("|");
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Parse `kubectl top nodes --no-headers` output.
  * Each line: NAME CPU(cores) CPU% MEMORY(bytes) MEMORY%.
@@ -545,41 +749,114 @@ export function parseTopPods(text) {
   return map;
 }
 
+/**
+ * Parse `kubectl top pods -A --no-headers` output.
+ * Each line: NAMESPACE NAME CPU(cores) MEMORY(bytes).
+ * Returns Map "namespace/name" -> { cpu, memory }. Also accepts the
+ * 3-column single-namespace form (handled by parseTopPods callers).
+ */
+export function parseTopPodsAll(text) {
+  const map = new Map();
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 3) continue;
+    if (parts.length >= 4) {
+      const [ns, name, cpu, memory] = parts;
+      if (ns && name) map.set(`${ns}/${name}`, { cpu, memory });
+    } else {
+      const [name, cpu, memory] = parts;
+      map.set(name, { cpu, memory });
+    }
+  }
+  return map;
+}
+
+/**
+ * One batched snapshot for the whole dashboard: ~5 kubectl calls total no
+ * matter how many projects/nodes exist. Each list degrades to empty on
+ * failure so one missing API (e.g. metrics-server) never blanks the rest.
+ */
+function fetchClusterSnapshot() {
+  const snap = {
+    nodesJson: null,
+    nodesError: null,
+    servicesJson: null,
+    servicesError: null,
+    deploymentsJson: null,
+    deploymentsError: null,
+    podsJson: null,
+    podsError: null,
+    topNodes: new Map(),
+    metricsAvailable: true,
+    topPodsAll: new Map(),
+    podMetricsAvailable: true,
+  };
+  try {
+    snap.nodesJson = kubectlJson(["get", "nodes", "-o", "json"]);
+  } catch (err) {
+    snap.nodesError = err?.message ?? "nodes query failed";
+  }
+  try {
+    snap.servicesJson = kubectlJson(["get", "svc", "-A", "-o", "json"]);
+  } catch (err) {
+    snap.servicesError = err?.message ?? "services query failed";
+  }
+  try {
+    snap.deploymentsJson = kubectlJson([
+      "get",
+      "deploy",
+      "-A",
+      "-l",
+      "coding-container=true",
+      "-o",
+      "json",
+    ]);
+  } catch (err) {
+    snap.deploymentsError = err?.message ?? "deployments query failed";
+  }
+  try {
+    snap.podsJson = kubectlJson(["get", "pods", "-A", "-l", "coding-container=true", "-o", "json"]);
+  } catch (err) {
+    snap.podsError = err?.message ?? "pods query failed";
+  }
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "top", "nodes", "--no-headers"], opts);
+    snap.topNodes = parseTopNodes(out);
+  } catch {
+    snap.metricsAvailable = false;
+  }
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "top", "pods", "-A", "--no-headers"], opts);
+    snap.topPodsAll = parseTopPodsAll(out);
+  } catch {
+    snap.podMetricsAvailable = false;
+  }
+  return snap;
+}
+
 function nodeReady(node) {
   const conds = node?.status?.conditions ?? [];
   const ready = conds.find((c) => c.type === "Ready");
   return ready?.status === "True";
 }
 
-/** Cluster nodes with capacity + live usage (when metrics-server exists). */
-export function getClusterNodes() {
-  const data = kubectlJson(["get", "nodes", "-o", "json"]);
-  const items = Array.isArray(data?.items) ? data.items : [];
-  let usage = new Map();
-  let metricsAvailable = true;
-  try {
-    const { cmd, args, opts } = kubectlExec();
-    const out = exec(cmd, [...args, "top", "nodes", "--no-headers"], opts);
-    usage = parseTopNodes(out);
-  } catch {
-    metricsAvailable = false;
+function countPodsByNode(podsJson) {
+  const counts = new Map();
+  for (const pod of podsJson?.items ?? []) {
+    const node = pod?.spec?.nodeName;
+    if (!node) continue;
+    counts.set(node, (counts.get(node) ?? 0) + 1);
   }
-  const nodes = items.map((n) => {
+  return counts;
+}
+
+function buildNodesList(nodesJson, usage, podCounts) {
+  const items = Array.isArray(nodesJson?.items) ? nodesJson.items : [];
+  return items.map((n) => {
     const name = n?.metadata?.name ?? "";
     const live = usage.get(name) ?? null;
-    const pods = (() => {
-      try {
-        const { cmd, args, opts } = kubectlExec();
-        const out = exec(
-          cmd,
-          [...args, "get", "pods", "--all-namespaces", "--field-selector", `spec.nodeName=${name}`, "-o", "json"],
-          opts
-        );
-        return (JSON.parse(out || "{}").items ?? []).length;
-      } catch {
-        return null;
-      }
-    })();
     return {
       name,
       ready: nodeReady(n),
@@ -587,7 +864,7 @@ export function getClusterNodes() {
       cpuAllocatable: n?.status?.allocatable?.cpu ?? null,
       memoryCapacity: n?.status?.capacity?.memory ?? null,
       memoryAllocatable: n?.status?.allocatable?.memory ?? null,
-      pods,
+      pods: podCounts !== null ? (podCounts.get(name) ?? 0) : null,
       kubelet: n?.status?.nodeInfo?.kubeletVersion ?? null,
       osImage: n?.status?.nodeInfo?.osImage ?? null,
       arch: n?.status?.nodeInfo?.architecture ?? null,
@@ -598,12 +875,74 @@ export function getClusterNodes() {
       memoryPercent: live?.memoryPercent ?? null,
     };
   });
+}
+
+function queryPodCountForNode(name) {
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(
+      cmd,
+      [...args, "get", "pods", "--all-namespaces", "--field-selector", `spec.nodeName=${name}`, "-o", "json"],
+      opts
+    );
+    return (JSON.parse(out || "{}").items ?? []).length;
+  } catch {
+    return null;
+  }
+}
+
+/** Cluster nodes with capacity + live usage (when metrics-server exists). */
+export function getClusterNodes() {
+  const data = kubectlJson(["get", "nodes", "-o", "json"]);
+  let usage = new Map();
+  let metricsAvailable = true;
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "top", "nodes", "--no-headers"], opts);
+    usage = parseTopNodes(out);
+  } catch {
+    metricsAvailable = false;
+  }
+  // One batched pod list for all node counts (was N per-node queries).
+  let podCounts = null;
+  try {
+    const podsJson = kubectlJson(["get", "pods", "-A", "-o", "json"]);
+    podCounts = countPodsByNode(podsJson);
+  } catch {
+    podCounts = null;
+  }
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const nodes = buildNodesList(data, usage, podCounts).map((n) => {
+    if (n.pods !== null) return n;
+    // Fallback for clusters/stubs where the batched list is unavailable.
+    return { ...n, pods: queryPodCountForNode(n.name) };
+  });
+  void items;
   return { nodes, metricsAvailable };
+}
+
+export function buildNodesFromSnapshot(snap) {
+  if (snap.nodesError) throw new Error(snap.nodesError);
+  const podCounts = snap.podsError ? null : countPodsByNode(snap.podsJson ?? { items: [] });
+  // Snapshot pod list is label-filtered; fall back to per-node counts only
+  // when the snapshot has no usable pod data at all.
+  const nodes = buildNodesList(snap.nodesJson, snap.topNodes, podCounts);
+  if (podCounts === null) {
+    return {
+      nodes: nodes.map((n) => ({ ...n, pods: queryPodCountForNode(n.name) })),
+      metricsAvailable: snap.metricsAvailable,
+    };
+  }
+  return { nodes, metricsAvailable: snap.metricsAvailable };
 }
 
 /** Every NodePort allocated cluster-wide (ports in use). */
 export function getClusterPorts() {
   const data = kubectlJson(["get", "svc", "-A", "-o", "json"]);
+  return buildPortsFromJson(data);
+}
+
+export function buildPortsFromJson(data) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const ports = [];
   for (const svc of items) {
@@ -624,6 +963,11 @@ export function getClusterPorts() {
   }
   ports.sort((a, b) => a.nodePort - b.nodePort);
   return { ports };
+}
+
+export function buildPortsFromSnapshot(snap) {
+  if (snap.servicesError) throw new Error(snap.servicesError);
+  return buildPortsFromJson(snap.servicesJson);
 }
 
 /**
@@ -704,128 +1048,334 @@ export function findClaimedNodePorts(wanted, others) {
   return claimed;
 }
 
-/**
- * Live per-project workload status for every registered project.
- * Never throws for a single project: failures degrade to { deployed: false }.
- */
-export function getWorkloadsStatus(projects) {
-  const out = [];
-  for (const p of projects ?? []) {
-    const entry = {
-      projectId: p?.id ?? null,
-      name: p?.name ?? "",
-      namespace: null,
-      project: null,
-      deployed: false,
-      ready: null,
-      replicas: null,
-      pods: [],
-      servicePorts: [],
-      configuredPorts: null,
-      resources: null,
-      image: null,
-      nodeName: null,
-      metricsAvailable: true,
-      error: null,
-    };
-    let cfg = null;
-    try {
-      const resolved = resolveStoredConfigPath(p?.configPath);
-      cfg = loadConfig(resolved);
-      entry.namespace = cfg.k8s.namespace;
-      entry.project = cfg.project;
-      entry.configuredPorts = configuredPorts(cfg);
-      entry.resources = cfg.k8s.resources ?? null;
-      entry.nodeName = cfg.k8s.nodeName || null;
+function blankWorkloadEntry(p) {
+  return {
+    projectId: p?.id ?? null,
+    name: p?.name ?? "",
+    namespace: null,
+    project: null,
+    deployed: false,
+    ready: null,
+    replicas: null,
+    pods: [],
+    servicePorts: [],
+    configuredPorts: null,
+    resources: null,
+    image: null,
+    nodeName: null,
+    metricsAvailable: true,
+    error: null,
+  };
+}
+
+function loadWorkloadConfig(p, entry, tagCache) {
+  const resolved = resolveStoredConfigPath(p?.configPath);
+  const cfg = loadConfig(resolved);
+  entry.namespace = cfg.k8s.namespace;
+  entry.project = cfg.project;
+  entry.configuredPorts = configuredPorts(cfg);
+  entry.resources = cfg.k8s.resources ?? null;
+  entry.nodeName = cfg.k8s.nodeName || null;
+  try {
+    // System ConfigMap read is per namespace; namespaces usually repeat, so
+    // cache the tag within one dashboard refresh (was 1 kubectl per project).
+    const ns = cfg.k8s.namespace;
+    if (!tagCache.has(ns)) {
+      try {
+        tagCache.set(ns, resolveDeployTag(cfg));
+      } catch {
+        tagCache.set(ns, null);
+      }
+    }
+    const tag = tagCache.get(ns);
+    // resolveDeployTag used the cfg instance above; reuse its tag only when
+    // it matches this project's namespace cache. Fall back per project when
+    // namespaces differ (cheap: no kubectl, tag already resolved or null).
+    if (tag) {
+      cfg.image.tag = tag;
+      entry.image = imageRef(cfg);
+    } else {
       try {
         cfg.image.tag = resolveDeployTag(cfg);
         entry.image = imageRef(cfg);
       } catch {
         entry.image = null;
       }
-    } catch (err) {
-      entry.error = err?.message ?? "cannot load config";
-      out.push(entry);
-      continue;
     }
+  } catch {
+    entry.image = null;
+  }
+  return cfg;
+}
+
+function fillWorkloadFromObjects(entry, cfg, { deploy, pods, podUsage, svc, metricsAvailable }) {
+  if (!deploy) return entry;
+  entry.deployed = true;
+  entry.replicas = {
+    replicas: deploy?.spec?.replicas ?? null,
+    ready: deploy?.status?.readyReplicas ?? 0,
+    updated: deploy?.status?.updatedReplicas ?? 0,
+    available: deploy?.status?.availableReplicas ?? 0,
+  };
+  entry.ready =
+    (deploy?.status?.readyReplicas ?? 0) > 0 &&
+    (deploy?.status?.readyReplicas ?? 0) >= (deploy?.spec?.replicas ?? 1);
+  entry.metricsAvailable = metricsAvailable;
+  const ns = cfg.k8s.namespace;
+  entry.pods = (pods ?? []).map((pod) => {
+    const podName = pod?.metadata?.name ?? "";
+    const podNs = pod?.metadata?.namespace ?? ns;
+    const live =
+      podUsage.get(`${podNs}/${podName}`) ?? podUsage.get(podName) ?? null;
+    const statuses = pod?.status?.containerStatuses ?? [];
+    const restarts = statuses.reduce((sum, s) => sum + (s?.restartCount ?? 0), 0);
+    return {
+      name: podName,
+      phase: pod?.status?.phase ?? null,
+      ready: (statuses.filter((s) => s?.ready).length ?? 0) + "/" + (statuses.length ?? 0),
+      restarts,
+      node: pod?.spec?.nodeName ?? null,
+      cpu: live?.cpu ?? null,
+      memory: live?.memory ?? null,
+      createdAt: pod?.metadata?.creationTimestamp ?? null,
+    };
+  });
+  try {
+    entry.servicePorts = (svc?.spec?.ports ?? []).map((sp) => ({
+      name: sp?.name ?? "",
+      port: sp?.port ?? null,
+      targetPort: sp?.targetPort ?? null,
+      nodePort: sp?.nodePort ?? null,
+      protocol: sp?.protocol ?? "TCP",
+    }));
+  } catch {
+    entry.servicePorts = [];
+  }
+  return entry;
+}
+
+function querySingleWorkload(entry, cfg) {
+  const ns = cfg.k8s.namespace;
+  const name = cfg.project;
+  let deploy = null;
+  try {
+    deploy = kubectlJson(["get", "deployment", name, "-n", ns, "-o", "json"]);
+  } catch {
+    return entry;
+  }
+  let podUsage = new Map();
+  let metricsAvailable = true;
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const top = exec(
+      cmd,
+      [...args, "top", "pods", "-l", `app=${name}`, "-n", ns, "--no-headers"],
+      opts
+    );
+    podUsage = parseTopPods(top);
+  } catch {
+    metricsAvailable = false;
+  }
+  let pods = [];
+  try {
+    const data = kubectlJson(["get", "pods", "-l", `app=${name}`, "-n", ns, "-o", "json"]);
+    pods = Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    pods = [];
+  }
+  let svc = null;
+  try {
+    svc = kubectlJson(["get", "svc", name, "-n", ns, "-o", "json"]);
+  } catch {
+    svc = null;
+  }
+  return fillWorkloadFromObjects(entry, cfg, { deploy, pods, podUsage, svc, metricsAvailable });
+}
+
+/**
+ * Live per-project workload status for every registered project.
+ * Never throws for a single project: failures degrade to { deployed: false }.
+ * Batched: 3 list calls shared across projects (+ metrics), with per-project
+ * fallback when the batch list is unavailable (old stubs, RBAC).
+ */
+export function getWorkloadsStatus(projects) {
+  const list = projects ?? [];
+  const entries = list.map(blankWorkloadEntry);
+  const cfgs = new Array(list.length).fill(null);
+  const tagCache = new Map();
+  for (let i = 0; i < list.length; i++) {
+    try {
+      cfgs[i] = loadWorkloadConfig(list[i], entries[i], tagCache);
+    } catch (err) {
+      entries[i].error = err?.message ?? "cannot load config";
+    }
+  }
+  const needCluster = cfgs.some(Boolean);
+  if (!needCluster) return { workloads: entries };
+
+  let batchUsable = true;
+  let deploysByKey = new Map();
+  let podsByKey = new Map();
+  let svcsByKey = new Map();
+  let topAll = new Map();
+  let podMetricsAvailable = true;
+  try {
+    const deploys = kubectlJson(["get", "deploy", "-A", "-l", "coding-container=true", "-o", "json"]);
+    for (const d of deploys?.items ?? []) {
+      deploysByKey.set(`${d?.metadata?.namespace ?? ""}/${d?.metadata?.name ?? ""}`, d);
+    }
+  } catch {
+    batchUsable = false;
+  }
+  try {
+    const podsJson = kubectlJson(["get", "pods", "-A", "-l", "coding-container=true", "-o", "json"]);
+    for (const pod of podsJson?.items ?? []) {
+      const app = pod?.metadata?.labels?.app ?? "";
+      const key = `${pod?.metadata?.namespace ?? ""}/${app}`;
+      if (!podsByKey.has(key)) podsByKey.set(key, []);
+      podsByKey.get(key).push(pod);
+    }
+  } catch {
+    batchUsable = false;
+  }
+  try {
+    const svcs = kubectlJson(["get", "svc", "-A", "-o", "json"]);
+    for (const s of svcs?.items ?? []) {
+      svcsByKey.set(`${s?.metadata?.namespace ?? ""}/${s?.metadata?.name ?? ""}`, s);
+    }
+  } catch {
+    batchUsable = false;
+  }
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "top", "pods", "-A", "--no-headers"], opts);
+    topAll = parseTopPodsAll(out);
+  } catch {
+    podMetricsAvailable = false;
+  }
+
+  for (let i = 0; i < list.length; i++) {
+    const cfg = cfgs[i];
+    if (!cfg) continue;
     try {
       const ns = cfg.k8s.namespace;
       const name = cfg.project;
-      let deploy = null;
-      try {
-        deploy = kubectlJson(["get", "deployment", name, "-n", ns, "-o", "json"]);
-      } catch {
-        deploy = null;
-      }
-      if (!deploy) {
-        out.push(entry);
-        continue;
-      }
-      entry.deployed = true;
-      entry.replicas = {
-        replicas: deploy?.spec?.replicas ?? null,
-        ready: deploy?.status?.readyReplicas ?? 0,
-        updated: deploy?.status?.updatedReplicas ?? 0,
-        available: deploy?.status?.availableReplicas ?? 0,
-      };
-      entry.ready =
-        (deploy?.status?.readyReplicas ?? 0) > 0 &&
-        (deploy?.status?.readyReplicas ?? 0) >= (deploy?.spec?.replicas ?? 1);
-
-      let podUsage = new Map();
-      try {
-        const { cmd, args, opts } = kubectlExec();
-        const top = exec(
-          cmd,
-          [...args, "top", "pods", "-l", `app=${name}`, "-n", ns, "--no-headers"],
-          opts
-        );
-        podUsage = parseTopPods(top);
-      } catch {
-        entry.metricsAvailable = false;
-      }
-      let pods = [];
-      try {
-        const data = kubectlJson(["get", "pods", "-l", `app=${name}`, "-n", ns, "-o", "json"]);
-        pods = Array.isArray(data?.items) ? data.items : [];
-      } catch {
-        pods = [];
-      }
-      entry.pods = pods.map((pod) => {
-        const podName = pod?.metadata?.name ?? "";
-        const live = podUsage.get(podName) ?? null;
-        const statuses = pod?.status?.containerStatuses ?? [];
-        const restarts = statuses.reduce((sum, s) => sum + (s?.restartCount ?? 0), 0);
-        return {
-          name: podName,
-          phase: pod?.status?.phase ?? null,
-          ready: (statuses.filter((s) => s?.ready).length ?? 0) + "/" + (statuses.length ?? 0),
-          restarts,
-          node: pod?.spec?.nodeName ?? null,
-          cpu: live?.cpu ?? null,
-          memory: live?.memory ?? null,
-          createdAt: pod?.metadata?.creationTimestamp ?? null,
-        };
-      });
-
-      try {
-        const svc = kubectlJson(["get", "svc", name, "-n", ns, "-o", "json"]);
-        entry.servicePorts = (svc?.spec?.ports ?? []).map((sp) => ({
-          name: sp?.name ?? "",
-          port: sp?.port ?? null,
-          targetPort: sp?.targetPort ?? null,
-          nodePort: sp?.nodePort ?? null,
-          protocol: sp?.protocol ?? "TCP",
-        }));
-      } catch {
-        entry.servicePorts = [];
+      if (batchUsable) {
+        fillWorkloadFromObjects(entries[i], cfg, {
+          deploy: deploysByKey.get(`${ns}/${name}`) ?? null,
+          pods: podsByKey.get(`${ns}/${name}`) ?? [],
+          podUsage: topAll,
+          svc: svcsByKey.get(`${ns}/${name}`) ?? null,
+          metricsAvailable: podMetricsAvailable,
+        });
+        // Batch listed nothing for this project while the cluster answered:
+        // fall back to the direct per-project query (e.g. objects without
+        // the shared label, or a stub pretending empty lists).
+        if (!entries[i].deployed) {
+          const direct = querySingleWorkload(blankWorkloadEntry(list[i]), cfg);
+          // Preserve config-derived fields already loaded above.
+          entries[i].deployed = direct.deployed;
+          entries[i].replicas = direct.replicas;
+          entries[i].ready = direct.ready;
+          entries[i].pods = direct.pods;
+          entries[i].servicePorts = direct.servicePorts;
+          entries[i].metricsAvailable = direct.metricsAvailable;
+        }
+      } else {
+        querySingleWorkload(entries[i], cfg);
       }
     } catch (err) {
-      entry.error = err?.message ?? "cluster query failed";
+      entries[i].error = err?.message ?? "cluster query failed";
     }
-    out.push(entry);
   }
-  return { workloads: out };
+  return { workloads: entries };
+}
+
+export function buildWorkloadsFromSnapshot(projects, snap) {
+  const list = projects ?? [];
+  const entries = list.map(blankWorkloadEntry);
+  const cfgs = new Array(list.length).fill(null);
+  const tagCache = new Map();
+  for (let i = 0; i < list.length; i++) {
+    try {
+      cfgs[i] = loadWorkloadConfig(list[i], entries[i], tagCache);
+    } catch (err) {
+      entries[i].error = err?.message ?? "cannot load config";
+    }
+  }
+  const deploysByKey = new Map();
+  for (const d of snap.deploymentsJson?.items ?? []) {
+    deploysByKey.set(`${d?.metadata?.namespace ?? ""}/${d?.metadata?.name ?? ""}`, d);
+  }
+  const podsByKey = new Map();
+  for (const pod of snap.podsJson?.items ?? []) {
+    const app = pod?.metadata?.labels?.app ?? "";
+    const key = `${pod?.metadata?.namespace ?? ""}/${app}`;
+    if (!podsByKey.has(key)) podsByKey.set(key, []);
+    podsByKey.get(key).push(pod);
+  }
+  const svcsByKey = new Map();
+  for (const s of snap.servicesJson?.items ?? []) {
+    svcsByKey.set(`${s?.metadata?.namespace ?? ""}/${s?.metadata?.name ?? ""}`, s);
+  }
+  for (let i = 0; i < list.length; i++) {
+    const cfg = cfgs[i];
+    if (!cfg) continue;
+    try {
+      const ns = cfg.k8s.namespace;
+      const name = cfg.project;
+      fillWorkloadFromObjects(entries[i], cfg, {
+        deploy: deploysByKey.get(`${ns}/${name}`) ?? null,
+        pods: podsByKey.get(`${ns}/${name}`) ?? [],
+        podUsage: snap.topPodsAll,
+        svc: svcsByKey.get(`${ns}/${name}`) ?? null,
+        metricsAvailable: snap.podMetricsAvailable,
+      });
+    } catch (err) {
+      entries[i].error = err?.message ?? "cluster query failed";
+    }
+  }
+  return entries;
+}
+
+/**
+ * One shared snapshot for the dashboard: nodes + ports + workloads from a
+ * single set of kubectl lists. Individual endpoints delegate to this so
+ * parallel page requests share results via the short-TTL cache.
+ */
+export function getClusterSummary(projects) {
+  const key = `summary:${projectsFingerprint(projects)}`;
+  return getCachedCluster(key, () => {
+    const snap = fetchClusterSnapshot();
+    let nodes = [];
+    let metricsAvailable = false;
+    let nodesError = null;
+    try {
+      ({ nodes, metricsAvailable } = buildNodesFromSnapshot(snap));
+    } catch (err) {
+      nodesError = err?.message ?? "nodes query failed";
+    }
+    let ports = [];
+    let portsError = null;
+    try {
+      ({ ports } = buildPortsFromSnapshot(snap));
+    } catch (err) {
+      portsError = err?.message ?? "services query failed";
+    }
+    // Workloads need config loading even when lists failed; never throws.
+    let workloads = [];
+    try {
+      if (snap.deploymentsError && snap.podsError && snap.servicesError) {
+        ({ workloads } = getWorkloadsStatus(projects));
+      } else {
+        workloads = buildWorkloadsFromSnapshot(projects, snap);
+      }
+    } catch (err) {
+      workloads = [{ error: err?.message ?? "cluster query failed", deployed: false }];
+    }
+    const ok = !nodesError && !portsError;
+    return { ok, nodes, metricsAvailable, nodesError, ports, portsError, workloads };
+  });
 }
 
 // ---------------------------------------------------------- output capture ---
@@ -1185,10 +1735,17 @@ async function readValidateParams(req, url) {
 
 // ------------------------------------------------------------------ router ---
 
-const PUBLIC_API = new Set(["/api/login", "/api/health"]);
+const PUBLIC_API = new Set(["/api/login", "/api/register", "/api/auth-status", "/api/health"]);
 
 export function createServer(env) {
   const projectsFile = env.projectsFile;
+  if (!env.authFile && projectsFile) {
+    try {
+      env.authFile = defaultAuthFile(projectsFile);
+    } catch {
+      // Leave unset: requests fall back to legacy credentials.
+    }
+  }
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, env, projectsFile).catch((err) => {
@@ -1273,6 +1830,56 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     sendJson(res, 200, { ok: true });
     return;
   }
+  if (method === "GET" && pathname === "/api/auth-status") {
+    const effective = getEffectiveAuth(env);
+    sendJson(res, 200, {
+      registered: effective.type !== "none",
+      canRegister: isLoopbackReq(req),
+    });
+    return;
+  }
+  if (method === "POST" && pathname === "/api/register") {
+    const effective = getEffectiveAuth(env);
+    if (effective.type !== "none") {
+      sendJson(res, 409, { error: "an account already exists — please sign in" });
+      return;
+    }
+    if (!isLoopbackReq(req)) {
+      sendJson(res, 403, {
+        error: "No sign-in exists yet. Open the app on the computer where it is running to create it — registration is not allowed over the network.",
+      });
+      return;
+    }
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      sendJson(res, 400, { error: err.message });
+      return;
+    }
+    const { email, password } = body ?? {};
+    const invalid = validateAuthInput(email, password);
+    if (invalid) {
+      sendJson(res, 400, { error: invalid });
+      return;
+    }
+    try {
+      writeAuthRecord(env.authFile, email, password);
+    } catch (err) {
+      sendJson(res, 500, { error: err.message });
+      return;
+    }
+    clearAllSessions();
+    if (env) {
+      env.adminEmail = String(email).trim();
+      env.adminPassword = "";
+    }
+    const token = issueSession(String(email).trim());
+    sendJson(res, 201, { ok: true, email: String(email).trim() }, {
+      "Set-Cookie": sessionCookieHeader(token, 12 * 3600),
+    });
+    return;
+  }
   if (method === "POST" && pathname === "/api/login") {
     let body;
     try {
@@ -1282,6 +1889,32 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       return;
     }
     const { email, password } = body ?? {};
+    const effective = getEffectiveAuth(env);
+    if (effective.type === "none") {
+      sendJson(res, 401, {
+        error: isLoopbackReq(req)
+          ? "No sign-in exists yet — create one to continue."
+          : "No sign-in exists yet. Open the app on the computer where it is running to create it.",
+      });
+      return;
+    }
+    if (effective.type === "file") {
+      const cleanEmail = String(email ?? "").trim();
+      if (
+        cleanEmail.toLowerCase() === effective.record.email.toLowerCase() &&
+        verifyAuthPassword(effective.record, password)
+      ) {
+        const token = issueSession(effective.record.email);
+        sendJson(res, 200, { ok: true, email: effective.record.email }, {
+          "Set-Cookie": sessionCookieHeader(token, 12 * 3600),
+        });
+        return;
+      }
+      sendJson(res, 401, { error: "invalid credentials" });
+      return;
+    }
+    // Legacy fallback: plaintext ADMIN_EMAIL/ADMIN_PASSWORD (pre-migration,
+    // kept for existing tests and checkouts until migrated on startup).
     if (
       env.adminPassword &&
       email === env.adminEmail &&
@@ -1298,15 +1931,34 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     return;
   }
 
+  // Delete-to-reset: the credential file is gone (and no legacy fallback),
+  // so every session is void. Frontends fall back to register/blocked.
+  if (getEffectiveAuth(env).type === "none") {
+    clearAllSessions();
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
   // Everything else under /api/* requires a session.
   const session = getSession(req);
   if (!session) {
     sendJson(res, 401, { error: "unauthorized" });
     return;
   }
+  // A re-registration with a different email voids older sessions.
+  const current = getEffectiveAuth(env);
+  if (current.type === "file" && session.email.toLowerCase() !== current.record.email.toLowerCase()) {
+    sessions.delete(session.token);
+    sendJson(res, 401, { error: "unauthorized" });
+    return;
+  }
 
   if (method === "GET" && pathname === "/api/me") {
     sendJson(res, 200, { email: session.email });
+    return;
+  }
+  if (method === "GET" && pathname === "/api/auth-info") {
+    sendJson(res, 200, { email: session.email, authFile: env.authFile ?? null });
     return;
   }
   if (method === "POST" && pathname === "/api/logout") {
@@ -1328,6 +1980,26 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       sendJson(res, 400, { error: invalid });
       return;
     }
+    const live = getEffectiveAuth(env);
+    if (live.type === "file") {
+      if (!verifyAuthPassword(live.record, currentPassword)) {
+        sendJson(res, 401, { error: "current password is incorrect" });
+        return;
+      }
+      try {
+        writeAuthRecord(env.authFile, live.record.email, newPassword);
+      } catch (err) {
+        sendJson(res, 500, { error: err.message });
+        return;
+      }
+      stripEnvPasswordLine(env.envFile);
+      // Keep only this session: a password change logs out other browsers.
+      for (const [token, sess] of sessions) {
+        if (sess.email === session.email && token !== session.token) sessions.delete(token);
+      }
+      sendJson(res, 200, { ok: true, persisted: true });
+      return;
+    }
     if (currentPassword !== env.adminPassword) {
       sendJson(res, 401, { error: "current password is incorrect" });
       return;
@@ -1340,6 +2012,9 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       sendJson(res, 500, { error: err.message });
       return;
     }
+    // Migrate the freshly changed legacy password to the hash file so the
+    // plaintext does not linger.
+    migrateLegacyToAuthFile(env);
     // Keep only this session: a password change logs out other browsers.
     for (const [token, sess] of sessions) {
       if (sess.email === session.email && token !== session.token) sessions.delete(token);
@@ -1920,32 +2595,68 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
   // Read-only live cluster state for the dashboard. Failures degrade to
   // { ok: false, error } so the UI can render config data without the
   // cluster (e.g. metrics-server missing, kubectl offline).
+  // Results share a short-TTL cache so parallel page requests reuse one set
+  // of kubectl lists instead of spawning dozens of processes per load.
   if (method === "GET" && pathname === "/api/cluster/nodes") {
-    try {
-      const { nodes, metricsAvailable } = getClusterNodes();
-      sendJson(res, 200, { ok: true, nodes, metricsAvailable });
-    } catch (err) {
-      sendJson(res, 200, { ok: false, nodes: [], metricsAvailable: false, error: err.message });
-    }
+    const body = getCachedCluster("nodes", () => {
+      try {
+        const { nodes, metricsAvailable } = getClusterNodes();
+        return { ok: true, nodes, metricsAvailable };
+      } catch (err) {
+        return { ok: false, nodes: [], metricsAvailable: false, error: err.message };
+      }
+    });
+    sendJson(res, 200, body);
     return;
   }
 
   if (method === "GET" && pathname === "/api/cluster/ports") {
-    try {
-      const { ports } = getClusterPorts();
-      sendJson(res, 200, { ok: true, ports });
-    } catch (err) {
-      sendJson(res, 200, { ok: false, ports: [], error: err.message });
-    }
+    const body = getCachedCluster("ports", () => {
+      try {
+        const { ports } = getClusterPorts();
+        return { ok: true, ports };
+      } catch (err) {
+        return { ok: false, ports: [], error: err.message };
+      }
+    });
+    sendJson(res, 200, body);
     return;
   }
 
   if (method === "GET" && pathname === "/api/cluster/workloads") {
+    const body = getCachedCluster(`workloads:${projectsFingerprint(readProjects(projectsFile))}`, () => {
+      try {
+        const { workloads } = getWorkloadsStatus(readProjects(projectsFile));
+        return { ok: true, workloads };
+      } catch (err) {
+        return { ok: false, workloads: [], error: err.message };
+      }
+    });
+    sendJson(res, 200, body);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cluster/summary") {
     try {
-      const { workloads } = getWorkloadsStatus(readProjects(projectsFile));
-      sendJson(res, 200, { ok: true, workloads });
+      const summary = getClusterSummary(readProjects(projectsFile));
+      sendJson(res, 200, {
+        ok: summary.ok,
+        nodes: summary.nodes,
+        metricsAvailable: summary.metricsAvailable,
+        ...(summary.nodesError ? { nodesError: summary.nodesError } : {}),
+        ports: summary.ports,
+        ...(summary.portsError ? { portsError: summary.portsError } : {}),
+        workloads: summary.workloads,
+      });
     } catch (err) {
-      sendJson(res, 200, { ok: false, workloads: [], error: err.message });
+      sendJson(res, 200, {
+        ok: false,
+        nodes: [],
+        metricsAvailable: false,
+        ports: [],
+        workloads: [],
+        error: err.message,
+      });
     }
     return;
   }
@@ -2073,6 +2784,8 @@ function serveStatic(req, res, method) {
 // ----------------------------------------------------------------- start ---
 
 export function startServer(env = loadEnvConfig()) {
+  if (!env.authFile) env.authFile = defaultAuthFile(env.projectsFile);
+  migrateLegacyToAuthFile(env);
   migrateProjectsFile(env.projectsFile, path.join(REPO_ROOT, "web", "projects.json"));
   ensureDefaultProject(env.projectsFile);
   const server = createServer(env);

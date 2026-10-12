@@ -11,8 +11,9 @@ Each checkout carries its own identity in a gitignored `.env` file at the repo r
 | `CODING_CONFIG_LEAF` | `coding-container` | global dir is `~/.config/<leaf>` (config, Dockerfile, keys, projects registry) |
 | `CODING_SSH_PREFIX` | `coding-` | SSH aliases are `<prefix><project>` |
 | `CODING_NAMESPACE` | `coding` | default k8s namespace (config files still override it) |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | GUI sign-in (see [GUI](./gui.md)) |
-| `PORT` | `3001` | GUI server port |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | legacy first GUI sign-in, migrated into the hashed credential file on startup (see [GUI](./gui.md)) |
+| `AUTH_FILE` | — | credential file override; default is `auth.json` next to the global config |
+| `PORT` | `3401` | GUI server port |
 | `PROJECTS_FILE` | — | registry override (absolute, or relative to the repo root); default is `projects.json` next to the global config |
 | `ALLOWED_ORIGIN` | — | optional single-origin CORS for the GUI API |
 

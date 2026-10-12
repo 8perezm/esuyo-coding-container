@@ -85,6 +85,17 @@ interface PortsResponse {
   error?: string;
 }
 
+interface SummaryResponse {
+  ok: boolean;
+  workloads?: Workload[];
+  nodes?: ClusterNode[];
+  metricsAvailable?: boolean;
+  ports?: UsedPort[];
+  nodesError?: string;
+  portsError?: string;
+  error?: string;
+}
+
 interface Job {
   id: string;
   op: string;
@@ -166,33 +177,57 @@ export function OverviewPage() {
   const load = useCallback(async (initial = false) => {
     if (initial) setLoaded(false);
     else setRefreshing(true);
-    const [wRes, nRes, pRes, jRes] = await Promise.allSettled([
-      api.get<WorkloadsResponse>('/api/cluster/workloads'),
-      api.get<NodesResponse>('/api/cluster/nodes'),
-      api.get<PortsResponse>('/api/cluster/ports'),
+    // One shared snapshot (server batches kubectl + caches 5s). Falls back
+    // to the three legacy endpoints when the server is old.
+    const [sRes, jRes] = await Promise.allSettled([
+      api.get<SummaryResponse>('/api/cluster/summary'),
       api.get<JobsResponse | Job[]>('/api/jobs'),
     ]);
-    if (wRes.status === 'fulfilled') {
-      setWorkloads(wRes.value.workloads ?? []);
-      setWorkloadsError(wRes.value.ok ? null : (wRes.value.error ?? 'Cluster unavailable'));
+    if (sRes.status === 'fulfilled') {
+      const s = sRes.value;
+      setWorkloads(s.workloads ?? []);
+      setWorkloadsError(s.ok ? null : (s.error ?? 'Cluster unavailable'));
+      setNodes(s.nodes ?? []);
+      setNodesMetrics(s.metricsAvailable ?? true);
+      setNodesError(s.nodesError ?? (s.ok ? null : (s.error ?? 'Cluster unavailable')));
+      setPorts(s.ports ?? []);
+      setPortsError(s.portsError ?? (s.ok ? null : (s.error ?? 'Cluster unavailable')));
+    } else if (sRes.reason instanceof ApiError && sRes.reason.status === 404) {
+      const [wRes, nRes, pRes] = await Promise.allSettled([
+        api.get<WorkloadsResponse>('/api/cluster/workloads'),
+        api.get<NodesResponse>('/api/cluster/nodes'),
+        api.get<PortsResponse>('/api/cluster/ports'),
+      ]);
+      if (wRes.status === 'fulfilled') {
+        setWorkloads(wRes.value.workloads ?? []);
+        setWorkloadsError(wRes.value.ok ? null : (wRes.value.error ?? 'Cluster unavailable'));
+      } else {
+        setWorkloads([]);
+        setWorkloadsError(clusterErr(wRes.reason));
+      }
+      if (nRes.status === 'fulfilled') {
+        setNodes(nRes.value.nodes ?? []);
+        setNodesMetrics(nRes.value.metricsAvailable ?? true);
+        setNodesError(nRes.value.ok ? null : (nRes.value.error ?? 'Cluster unavailable'));
+      } else {
+        setNodes([]);
+        setNodesError(clusterErr(nRes.reason));
+      }
+      if (pRes.status === 'fulfilled') {
+        setPorts(pRes.value.ports ?? []);
+        setPortsError(pRes.value.ok ? null : (pRes.value.error ?? 'Cluster unavailable'));
+      } else {
+        setPorts([]);
+        setPortsError(clusterErr(pRes.reason));
+      }
     } else {
+      const err = clusterErr(sRes.reason);
       setWorkloads([]);
-      setWorkloadsError(clusterErr(wRes.reason));
-    }
-    if (nRes.status === 'fulfilled') {
-      setNodes(nRes.value.nodes ?? []);
-      setNodesMetrics(nRes.value.metricsAvailable ?? true);
-      setNodesError(nRes.value.ok ? null : (nRes.value.error ?? 'Cluster unavailable'));
-    } else {
+      setWorkloadsError(err);
       setNodes([]);
-      setNodesError(clusterErr(nRes.reason));
-    }
-    if (pRes.status === 'fulfilled') {
-      setPorts(pRes.value.ports ?? []);
-      setPortsError(pRes.value.ok ? null : (pRes.value.error ?? 'Cluster unavailable'));
-    } else {
+      setNodesError(err);
       setPorts([]);
-      setPortsError(clusterErr(pRes.reason));
+      setPortsError(err);
     }
     if (jRes.status === 'fulfilled') {
       const data = jRes.value;

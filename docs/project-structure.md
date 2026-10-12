@@ -59,9 +59,9 @@ esuyo-coding-container/
 │   │   └── ssh-terminal.test.mjs  # terminal transport tests (routing, frame codec, upgrade flow)
 │   └── client/             # React 18 + TS + Vite + Tailwind SPA (served from web/client/dist by the backend)
 │       ├── package.json    # separate install/lockfile (npm --prefix web/client install); scripts: dev/build/preview
-│       ├── vite.config.ts  # dev :3000 + /api proxy (incl. websockets) at VITE_API_TARGET (default 127.0.0.1:3001)
+│       ├── vite.config.ts  # dev :3400 + /api proxy (incl. websockets) at VITE_API_TARGET (default 127.0.0.1:3401)
 │       └── src/
-│           ├── App.tsx     # routes (/login, /, /projects..., /images, /system, /ssh-keys, /setup, /jobs, /profile)
+│           ├── App.tsx     # routes (/login, /register, /, /projects..., /images, /system, /ssh-keys, /setup, /jobs, /profile)
 │           ├── auth/       # AuthContext + RequireAuth/LoginPage (session-cookie flow)
 │           ├── lib/        # api.ts (same-origin fetch client), projects.tsx, systemJobs.ts
 │           ├── components/ # layout (Sidebar/Header/Layout/ProfileBlock/ThemeToggle), ui kit, JobOutput, ValidatePanel, YamlEditor, ProjectDeployTab

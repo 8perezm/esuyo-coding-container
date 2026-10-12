@@ -13,6 +13,8 @@ interface AuthState {
   error: string | null;
   refresh: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
+  authStatus: () => Promise<{ registered: boolean; canRegister: boolean }>;
   logout: () => Promise<void>;
   setDisplayUser: (user: User | null) => void;
 }
@@ -50,6 +52,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me);
   }, []);
 
+  const register = useCallback(async (email: string, password: string) => {
+    const me = await api.post<User>('/api/register', { email, password });
+    setUser(me);
+  }, []);
+
+  const authStatus = useCallback(async () => {
+    return api.get<{ registered: boolean; canRegister: boolean }>('/api/auth-status');
+  }, []);
+
   const logout = useCallback(async () => {
     await api.post('/api/logout');
     setUser(null);
@@ -60,8 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthState>(
-    () => ({ user, loading, error, refresh, login, logout, setDisplayUser }),
-    [user, loading, error, refresh, login, logout, setDisplayUser],
+    () => ({ user, loading, error, refresh, login, register, authStatus, logout, setDisplayUser }),
+    [user, loading, error, refresh, login, register, authStatus, logout, setDisplayUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

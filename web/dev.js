@@ -2,7 +2,7 @@
 /**
  * GUI dev launcher: runs the backend API and the Vite frontend together.
  *
- *   npm run dev          # backend (:3001, from .env PORT) + Vite (:3000)
+ *   npm run dev          # backend (:3401, from .env PORT) + Vite (:3400)
  *   npm run dev:kill     # kill orphaned dev servers still holding those ports
  *
  * Zero dependencies (node: builtins only). `npm --prefix` is not used so the
@@ -23,8 +23,9 @@ const CLIENT_DIR = path.join(WEB_DIR, "client");
 
 if (!fs.existsSync(ENV_PATH) && !fs.existsSync(LEGACY_ENV_PATH)) {
   console.warn(
-    `warning: ${ENV_PATH} not found — copy .env.example to .env and set ` +
-      `ADMIN_EMAIL + ADMIN_PASSWORD, or login will always fail.`
+    `warning: ${ENV_PATH} not found — copy .env.example to .env. ` +
+      `The first launch migrates a legacy ADMIN_EMAIL + ADMIN_PASSWORD into the hashed credential file; ` +
+      `otherwise the pages ask to create the sign-in on the local machine.`
   );
 }
 
@@ -35,6 +36,26 @@ if (!fs.existsSync(path.join(CLIENT_DIR, "node_modules"))) {
   );
   process.exit(1);
 }
+
+const VITE_PORT = 3400;
+const DEFAULT_API_PORT = 3401;
+
+function readApiPort() {
+  if (process.env.PORT && Number.isInteger(Number(process.env.PORT)) && Number(process.env.PORT) > 0) {
+    return Number(process.env.PORT);
+  }
+  for (const p of [ENV_PATH, LEGACY_ENV_PATH]) {
+    try {
+      const match = fs.readFileSync(p, "utf8").match(/^PORT=(\d+)\s*$/m);
+      if (match) return Number(match[1]);
+    } catch {
+      /* missing/unreadable .env — try the next candidate */
+    }
+  }
+  return DEFAULT_API_PORT;
+}
+
+console.log(`GUI dev servers: pages http://localhost:${VITE_PORT}, API http://localhost:${readApiPort()}`);
 
 function launch(name, cmd, args, cwd) {
   // On Windows `npm` is npm.cmd, which Node can only spawn via a shell —
