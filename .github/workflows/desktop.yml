@@ -4,12 +4,18 @@ name: Desktop builds
 # including MSIX on Windows. For signed/Store releases, add signing secrets
 # and replace the MSIX placeholder identity in electron/electron-builder.yml.
 #
+# NOTE: automatic per-release builds run as the `desktop` job inside
+# publish.yml, not here. Tags and releases created with GITHUB_TOKEN do not
+# trigger other workflows, so this workflow cannot chain off the publish
+# flow. The triggers below cover human-pushed tags (which do trigger runs)
+# and manual builds/backfills.
+#
 # Triggers:
-# - `v*` tags: created automatically by the publish workflow on every push
-#   to main, so each GitHub Release gets its installers attached.
+# - `v*` tags pushed by a person: rebuild + attach installers for that tag.
 # - `desktop-v*` tags: manual desktop-only rebuild without an npm publish.
-# - `release published`: fires after the publish workflow creates the
-#   GitHub Release, attaching the installers to that release.
+# - `release published`: only fires for releases created by a person or a
+#   PAT; releases created by the publish workflow (GITHUB_TOKEN) do not
+#   trigger this.
 on:
   workflow_dispatch:
     inputs:
