@@ -162,6 +162,20 @@ export function ProjectsPage() {
 
   const activeProjects = projects.filter((p) => deployedIds?.has(p.id));
   const inactiveProjects = projects.filter((p) => !deployedIds?.has(p.id));
+  const workloadsLoading = deployedIds === null;
+
+  const renderWorkloadsLoading = (ref: string) => (
+    <div
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}
+      aria-label="Loading cluster status"
+      data-ref={ref}
+    >
+      <div className="skeleton" style={{ height: 48 }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Spinner label="Loading cluster status…" />
+      </div>
+    </div>
+  );
 
   const renderProjectRow = (p: Project) => {
     const isSelected = p.id === activeId;
@@ -323,7 +337,9 @@ export function ProjectsPage() {
       ) : (
         <>
           <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: '0 0 12px' }} data-ref="page-projects-active-heading">Active projects</h2>
-          {activeProjects.length === 0 ? (
+          {workloadsLoading ? (
+            renderWorkloadsLoading('page-projects-active-loading')
+          ) : activeProjects.length === 0 ? (
             <Card style={{ marginBottom: 24 }} data-ref="page-projects-active-empty-card">
               <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-projects-active-empty">
                 No active projects — nothing is currently deployed to the cluster.
@@ -334,7 +350,9 @@ export function ProjectsPage() {
           )}
 
           <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: '0 0 12px' }} data-ref="page-projects-inactive-heading">Inactive projects</h2>
-          {inactiveProjects.length === 0 ? (
+          {workloadsLoading ? (
+            renderWorkloadsLoading('page-projects-inactive-loading')
+          ) : inactiveProjects.length === 0 ? (
             <Card data-ref="page-projects-inactive-empty-card">
               <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-projects-inactive-empty">
                 No inactive projects — everything is deployed.

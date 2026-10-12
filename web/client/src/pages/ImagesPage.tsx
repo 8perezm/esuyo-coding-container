@@ -613,6 +613,15 @@ export function ImagesPage() {
                 Builds and tags a new shared image. Custom-mode projects are refused by the server —
                 any refusal is shown below.
               </p>
+              {!useProjectOverride && globalDockerfile ? (
+                <p data-ref="page-images-publish-dockerfile" style={{ margin: '0 0 16px', fontSize: 'var(--font-size-sm)', wordBreak: 'break-all' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>System Dockerfile: </span>
+                  <code data-ref="page-images-publish-dockerfile-code" style={monoStyle}>{globalDockerfile.path}</code>
+                  {!globalDockerfile.exists ? (
+                    <span data-ref="page-images-publish-dockerfile-missing" style={{ color: 'var(--color-error, #b3261e)' }}> (missing — run setup to create it)</span>
+                  ) : null}
+                </p>
+              ) : null}
               <form data-ref="page-images-form-publish" onSubmit={handlePublish}>
                 <div style={{ maxWidth: 480 }}>
                   <Label htmlFor="images-publish-tag">Tag (optional)</Label>

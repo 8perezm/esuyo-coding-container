@@ -143,6 +143,200 @@ function compareWorkloads(a: Workload, b: Workload): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
 
+// Human-readable CPU/memory. kubectl-style values look like "250m", "1",
+// "1500000n" (CPU) and "220Mi", "1Gi" (memory) — raw strings confuse the
+// projects table, especially when a workload has several pods.
+export function parseCpuToMillicores(raw?: string | null): number | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (!s || s === '—') return null;
+  if (s.endsWith('n')) {
+    const v = Number.parseFloat(s.slice(0, -1));
+    return Number.isNaN(v) ? null : v / 1e6;
+  }
+  if (s.endsWith('u')) {
+    const v = Number.parseFloat(s.slice(0, -1));
+    return Number.isNaN(v) ? null : v / 1000;
+  }
+  if (s.endsWith('m') && !s.endsWith('Mi')) {
+    const v = Number.parseFloat(s.slice(0, -1));
+    return Number.isNaN(v) ? null : v;
+  }
+  const v = Number.parseFloat(s);
+  return Number.isNaN(v) ? null : v * 1000;
+}
+
+export function parseMemoryToBytes(raw?: string | null): number | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (!s || s === '—') return null;
+  const m = s.match(/^([0-9.]+)\s*([A-Za-z]*)$/);
+  if (!m) return null;
+  const value = Number.parseFloat(m[1]);
+  if (Number.isNaN(value)) return null;
+  const suffix = m[2] ?? '';
+  const binary: Record<string, number> = {
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    Pi: 1024 ** 5,
+    Ei: 1024 ** 6,
+  };
+  const decimal: Record<string, number> = {
+    k: 1000,
+    K: 1000,
+    M: 1000 ** 2,
+    G: 1000 ** 3,
+    T: 1000 ** 4,
+    P: 1000 ** 5,
+    E: 1000 ** 6,
+  };
+  if (!suffix) return value;
+  if (binary[suffix] !== undefined) return value * binary[suffix];
+  if (decimal[suffix] !== undefined) return value * decimal[suffix];
+  if (suffix === 'm') return value / 1000;
+  return null;
+}
+
+function trimNum(value: number, digits: number): string {
+  const fixed = value.toFixed(digits);
+  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+}
+
+export function formatCpuMillicores(millicores: number | null): string {
+  if (millicores === null || Number.isNaN(millicores)) return '—';
+  if (millicores >= 1000) return `${trimNum(millicores / 1000, 2)} cores`;
+  if (millicores >= 100) return `${trimNum(Math.round(millicores * 10) / 10, 1)} mCPU`;
+  if (millicores >= 1) return `${trimNum(Math.round(millicores * 10) / 10, 1)} mCPU`;
+  return `${trimNum(Math.round(millicores * 100) / 100, 2)} mCPU`;
+}
+
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null || Number.isNaN(bytes)) return '—';
+  const GiB = 1024 ** 3;
+  const MiB = 1024 ** 2;
+  const KiB = 1024;
+  if (bytes >= GiB) return `${trimNum(bytes / GiB, 2)} GiB`;
+  if (bytes >= MiB) {
+    const v = bytes / MiB;
+    return `${trimNum(v, v >= 100 ? 0 : 1)} MiB`;
+  }
+  if (bytes >= KiB) return `${trimNum(bytes / KiB, 0)} KiB`;
+  return `${Math.round(bytes)} B`;
+}
+
+function workloadCpuMillicores(w: Workload): number | null {
+  if (!w.deployed || w.pods.length === 0) return null;
+  let total = 0;
+  let seen = false;
+  for (const p of w.pods) {
+    const v = parseCpuToMillicores(p.cpu);
+    if (v !== null) {
+      total += v;
+      seen = true;
+    }
+  }
+  return seen ? total : null;
+}
+
+function workloadMemoryBytes(w: Workload): number | null {
+  if (!w.deployed || w.pods.length === 0) return null;
+  let total = 0;
+  let seen = false;
+  for (const p of w.pods) {
+    const v = parseMemoryToBytes(p.memory);
+    if (v !== null) {
+      total += v;
+      seen = true;
+    }
+  }
+  return seen ? total : null;
+}
+
+function workloadNodeName(w: Workload): string {
+  return w.pods[0]?.node ?? w.nodeName ?? '';
+}
+
+type ProjectSortKey = 'name' | 'status' | 'cpu' | 'memory' | 'node';
+type StatusFilter = 'all' | 'running' | 'stopped';
+
+const FILTER_STORAGE_KEY = 'overviewProjectsFilter';
+const SORT_KEY_STORAGE_KEY = 'overviewProjectsSortKey';
+const SORT_DIR_STORAGE_KEY = 'overviewProjectsSortDir';
+
+const SORT_KEYS: ProjectSortKey[] = ['name', 'status', 'cpu', 'memory', 'node'];
+
+function readStoredFilter(): StatusFilter {
+  try {
+    const v = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    return v === 'running' || v === 'stopped' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+function readStoredSortKey(): ProjectSortKey | null {
+  try {
+    const v = window.localStorage.getItem(SORT_KEY_STORAGE_KEY);
+    return (SORT_KEYS as string[]).includes(v ?? '') ? (v as ProjectSortKey) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredSortDir(): 1 | -1 {
+  try {
+    return window.localStorage.getItem(SORT_DIR_STORAGE_KEY) === '-1' ? -1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function persistStored(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable — selection just won't persist */
+  }
+}
+
+function compareWorkloadsByKey(a: Workload, b: Workload, key: ProjectSortKey, dir: 1 | -1): number {
+  let diff = 0;
+  switch (key) {
+    case 'name':
+      diff = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      break;
+    case 'status':
+      diff = statusLabel(a).localeCompare(statusLabel(b), undefined, { sensitivity: 'base' });
+      break;
+    case 'cpu': {
+      const av = workloadCpuMillicores(a) ?? -1;
+      const bv = workloadCpuMillicores(b) ?? -1;
+      diff = av - bv;
+      break;
+    }
+    case 'memory': {
+      const av = workloadMemoryBytes(a) ?? -1;
+      const bv = workloadMemoryBytes(b) ?? -1;
+      diff = av - bv;
+      break;
+    }
+    case 'node':
+      diff = workloadNodeName(a).localeCompare(workloadNodeName(b), undefined, { sensitivity: 'base' });
+      break;
+  }
+  if (diff === 0) diff = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  return diff * dir;
+}
+
+// Five table rows (plus the sticky header) set the default ports-table
+// height; users can drag the handle to grow/shrink it.
+const PORTS_ROW_PX = 45;
+const PORTS_HEADER_PX = 45;
+const PORTS_DEFAULT_ROWS = 5;
+const PORTS_DEFAULT_HEIGHT = PORTS_HEADER_PX + PORTS_ROW_PX * PORTS_DEFAULT_ROWS;
+
 function clusterErr(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
     return 'endpoint not found (404) — the GUI server is running old code. Restart it from this repo (see below) so it serves /api/cluster/*.';
@@ -151,10 +345,61 @@ function clusterErr(err: unknown): string {
   return errMsg(err);
 }
 
-function formatStartedAt(value?: string | null): string {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+// One small green square per pod, shown to the right of the project name.
+// Hovering (or keyboard-focusing) the squares shows a compact "N pods" tip.
+function PodSquares({ count }: { count: number }) {
+  const [open, setOpen] = useState(false);
+  if (count <= 0) return null;
+  const label = count === 1 ? '1 pod' : `${count} pods`;
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 8 }}
+      data-ref="page-overview-pod-squares"
+      aria-label={label}
+      tabIndex={0}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      {Array.from({ length: count }).map((_, i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          data-ref="page-overview-pod-square"
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 2,
+            backgroundColor: 'var(--color-success, #1a7f37)',
+            display: 'inline-block',
+          }}
+        />
+      ))}
+      {open && (
+        <span
+          role="tooltip"
+          data-ref="page-overview-pod-squares-tip"
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 4px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '2px 6px',
+            whiteSpace: 'nowrap',
+            backgroundColor: 'var(--text-primary)',
+            color: 'var(--bg-card)',
+            borderRadius: 4,
+            fontSize: 'var(--font-size-xs)',
+            zIndex: 5,
+            pointerEvents: 'none',
+          }}
+        >
+          {label}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function OverviewPage() {
@@ -173,6 +418,11 @@ export function OverviewPage() {
   const [notice, setNotice] = useState<{ op: string; project: string; id: string; status: string } | null>(null);
   const [rowJobs, setRowJobs] = useState<Record<string, { op: string; project: string; id: string; status: string; startedAt: number }>>({});
   const [deleteTarget, setDeleteTarget] = useState<Workload | null>(null);
+  const [sortKey, setSortKey] = useState<ProjectSortKey | null>(readStoredSortKey);
+  const [sortDir, setSortDir] = useState<1 | -1>(readStoredSortDir);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(readStoredFilter);
+  const [portsHeight, setPortsHeight] = useState(PORTS_DEFAULT_HEIGHT);
+  const [portsResizing, setPortsResizing] = useState(false);
 
   const load = useCallback(async (initial = false) => {
     if (initial) setLoaded(false);
@@ -321,7 +571,64 @@ export function OverviewPage() {
 
   const runningCount = workloads?.filter((w) => w.deployed && w.ready).length ?? 0;
   const readyNodes = nodes?.filter((n) => n.ready).length ?? 0;
-  const sortedWorkloads = workloads ? [...workloads].sort(compareWorkloads) : workloads;
+  const filteredWorkloads = (workloads ?? []).filter((w) => {
+    const label = statusLabel(w);
+    if (statusFilter === 'running') return label === 'Running';
+    if (statusFilter === 'stopped') return label === 'Stopped';
+    return true;
+  });
+  const sortedWorkloads = [...filteredWorkloads].sort((a, b) =>
+    sortKey ? compareWorkloadsByKey(a, b, sortKey, sortDir) : compareWorkloads(a, b),
+  );
+
+  const toggleSort = useCallback((key: ProjectSortKey) => {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir(1);
+    } else {
+      setSortDir((d) => (d === 1 ? -1 : 1));
+    }
+  }, [sortKey]);
+
+  useEffect(() => {
+    persistStored(FILTER_STORAGE_KEY, statusFilter);
+  }, [statusFilter]);
+
+  useEffect(() => {
+    persistStored(SORT_KEY_STORAGE_KEY, sortKey ?? '');
+  }, [sortKey]);
+
+  useEffect(() => {
+    persistStored(SORT_DIR_STORAGE_KEY, String(sortDir));
+  }, [sortDir]);
+
+  const sortIndicator = (key: ProjectSortKey): string => {
+    if (sortKey !== key) return '';
+    return sortDir === 1 ? ' ▲' : ' ▼';
+  };
+
+  const sortAria = (key: ProjectSortKey): 'ascending' | 'descending' | 'none' => {
+    if (sortKey !== key) return 'none';
+    return sortDir === 1 ? 'ascending' : 'descending';
+  };
+
+  const startPortsResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = portsHeight;
+    setPortsResizing(true);
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(800, Math.max(120, startHeight + (ev.clientY - startY)));
+      setPortsHeight(next);
+    };
+    const onUp = () => {
+      setPortsResizing(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [portsHeight]);
 
   const stats = [
     { label: 'Projects running', to: '/projects', hint: `${runningCount} / ${workloads?.length ?? '—'} deployed`, value: !loaded ? '…' : `${runningCount}/${workloads?.length ?? 0}` },
@@ -365,7 +672,24 @@ export function OverviewPage() {
         </Card>
       )}
 
-      <h2 style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 12 }} data-ref="page-overview-projects-heading">Projects</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 12 }} data-ref="page-overview-projects-header-row">
+        <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: 0 }} data-ref="page-overview-projects-heading">Projects</h2>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+          <span>Status</span>
+          <select
+            className="input"
+            style={{ minHeight: 32, width: 'auto', padding: '4px 8px' }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            aria-label="Filter projects by status"
+            data-ref="page-overview-projects-filter"
+          >
+            <option value="all">All</option>
+            <option value="running">Running</option>
+            <option value="stopped">Stopped</option>
+          </select>
+        </label>
+      </div>
       {notice && (
         <Card
           role="status"
@@ -414,31 +738,44 @@ export function OverviewPage() {
         <div data-ref="page-overview-empty">
           <EmptyState title="No projects yet" description="Add a project first, then deploy it to the cluster." action={<Link to="/projects" data-ref="page-overview-empty-projects-link">Go to Projects</Link>} />
         </div>
+      ) : sortedWorkloads.length === 0 ? (
+        <Card data-ref="page-overview-projects-filtered-empty-card">
+          <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-overview-projects-filtered-empty">
+            No projects match this filter.
+          </p>
+        </Card>
       ) : (
         <TableContainer data-ref="page-overview-projects-table-container">
           <Table aria-label="Projects dashboard" data-ref="page-overview-projects-table">
             <THead>
               <TR>
-                <TH>Project</TH>
-                <TH>Status</TH>
+                <TH aria-sort={sortAria('name')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('name')} title="Sort by project" data-ref="page-overview-sort-name">Project{sortIndicator('name')}</TH>
+                <TH aria-sort={sortAria('status')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('status')} title="Sort by status" data-ref="page-overview-sort-status">Status{sortIndicator('status')}</TH>
                 <TH>Ports</TH>
-                <TH>CPU</TH>
-                <TH>Memory</TH>
-                <TH>Node</TH>
+                <TH aria-sort={sortAria('cpu')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('cpu')} title="Sort by CPU" data-ref="page-overview-sort-cpu">CPU{sortIndicator('cpu')}</TH>
+                <TH aria-sort={sortAria('memory')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('memory')} title="Sort by memory" data-ref="page-overview-sort-memory">Memory{sortIndicator('memory')}</TH>
+                <TH aria-sort={sortAria('node')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('node')} title="Sort by node" data-ref="page-overview-sort-node">Node{sortIndicator('node')}</TH>
                 <TH>Actions</TH>
               </TR>
             </THead>
             <TBody>
-              {sortedWorkloads!.map((w) => {
+              {sortedWorkloads.map((w) => {
                 const key = w.projectId ?? w.name;
                 const isPending = pending === `deploy:${w.projectId}` || pending === `delete:${w.projectId}`;
-                const cpuText = !w.deployed ? '—' : w.pods.length === 0 ? '—' : w.pods.map((p) => p.cpu ?? '—').join(', ');
-                const memText = !w.deployed ? '—' : w.pods.length === 0 ? '—' : w.pods.map((p) => p.memory ?? '—').join(', ');
+                const cpuTotal = workloadCpuMillicores(w);
+                const memTotal = workloadMemoryBytes(w);
+                const cpuRaw = !w.deployed ? null : w.pods.length === 0 ? null : w.pods.map((p) => p.cpu ?? '—').join(', ');
+                const memRaw = !w.deployed ? null : w.pods.length === 0 ? null : w.pods.map((p) => p.memory ?? '—').join(', ');
+                const cpuHuman = !w.deployed ? '—' : w.pods.length === 0 ? '—' : formatCpuMillicores(cpuTotal);
+                const memHuman = !w.deployed ? '—' : w.pods.length === 0 ? '—' : formatBytes(memTotal);
                 const podNode = w.pods[0]?.node ?? w.nodeName ?? '—';
                 return (
                   <TR key={key}>
                     <TD>
-                      <div style={{ fontWeight: 600 }}>{w.name}</div>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                        <span>{w.name}</span>
+                        {w.deployed && w.pods.length > 0 && <PodSquares count={w.pods.length} />}
+                      </div>
                       <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                         {dash(w.namespace)}{w.project && w.project !== w.name ? ` / ${w.project}` : ''}
                         {w.replicas ? ` · ${w.replicas.ready ?? 0}/${w.replicas.replicas ?? 0} ready` : ''}
@@ -463,13 +800,13 @@ export function OverviewPage() {
                         </span>
                       ) : '—'}
                     </TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {cpuText}
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={cpuRaw ?? undefined}>
+                      {cpuHuman}
                       {w.deployed && !w.metricsAvailable && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>metrics n/a</span>}
                       {w.resources?.limits?.cpu && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>limit {w.resources.limits.cpu}</span>}
                     </TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {memText}
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={memRaw ?? undefined}>
+                      {memHuman}
                       {w.resources?.limits?.memory && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>limit {w.resources.limits.memory}</span>}
                     </TD>
                     <TD style={{ fontSize: 'var(--font-size-xs)' }}>{podNode}</TD>
@@ -566,11 +903,11 @@ export function OverviewPage() {
       ) : (
         <div>
           <p data-ref="page-overview-ports-count" style={{ margin: '0 0 8px', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-            {ports.length} port{ports.length === 1 ? '' : 's'} in use{ports.length > 10 ? ' — scroll to see all' : ''}.
+            {ports.length} port{ports.length === 1 ? '' : 's'} in use{ports.length > 5 ? ' — scroll or drag the handle to see more' : ''}.
           </p>
           <TableContainer
             data-ref="page-overview-ports-table-container"
-            style={{ maxHeight: 480, overflowY: 'auto' }}
+            style={{ height: portsHeight, overflowY: 'auto', position: 'relative' }}
           >
             <Table aria-label="Ports in use" data-ref="page-overview-ports-table">
               <THead>
@@ -593,41 +930,35 @@ export function OverviewPage() {
               </TBody>
             </Table>
           </TableContainer>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Drag to resize ports table"
+            aria-valuenow={Math.round(portsHeight)}
+            title="Drag up or down to resize"
+            data-ref="page-overview-ports-resize"
+            onMouseDown={startPortsResize}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              height: 20,
+              marginTop: 2,
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              backgroundColor: 'var(--bg-card)',
+              cursor: 'ns-resize',
+              touchAction: 'none',
+              userSelect: 'none',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--font-size-xs)',
+            }}
+          >
+            <span aria-hidden="true" style={{ letterSpacing: 2 }}>═══</span>
+            <span>{portsResizing ? 'Resizing…' : 'Drag to resize'}</span>
+          </div>
         </div>
-      )}
-
-      <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: '24px 0 12px' }} data-ref="page-overview-jobs-heading">Recent jobs</h2>
-      {jobs.length === 0 ? (
-        <div data-ref="page-overview-jobs-empty">
-          <EmptyState title="No jobs yet" description="Deploy / delete operations will appear here." action={<Link to="/jobs" data-ref="page-overview-jobs-empty-link">View jobs</Link>} />
-        </div>
-      ) : (
-        <TableContainer data-ref="page-overview-jobs-table-container">
-          <Table data-ref="page-overview-jobs-table">
-            <THead>
-              <TR>
-                <TH>ID</TH>
-                <TH>Op</TH>
-                <TH>Status</TH>
-                <TH>Started</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {jobs.slice(0, 8).map((job) => (
-                <TR key={job.id}>
-                  <TD>
-                    <Link to="/jobs" title={job.id} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-                      {job.id.slice(0, 8)}
-                    </Link>
-                  </TD>
-                  <TD>{job.op}</TD>
-                  <TD><Badge tone={job.status === 'running' ? 'accent' : job.status === 'error' ? 'violet' : 'default'}>{job.status}</Badge></TD>
-                  <TD>{formatStartedAt(job.startedAt)}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </TableContainer>
       )}
 
       {deleteTarget && (

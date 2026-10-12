@@ -77,6 +77,7 @@ export function ProfilePage() {
       <PageHeader title="Profile" description="Display name and sign-in password." />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div className="profile-grid" data-ref="page-profile-columns">
         <section>
           <h2 data-ref="page-profile-heading-profile" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 12 }}>
             Display name
@@ -182,6 +183,7 @@ export function ProfilePage() {
             )}
           </Card>
         </section>
+        </div>
 
         <section>
           <h2 data-ref="page-profile-reset-heading" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 12 }}>
