@@ -9,3 +9,4 @@ config.local.yaml
 *.log
 coverage/
 .DS_Store
+electron/dist/

@@ -39,6 +39,17 @@ import { exec } from "../../src/utils/exec.js";
 import { allocateNodePort } from "../../src/utils/project.js";
 import { sidecarNodePorts, webPorts } from "../../src/utils/manifest.js";
 import { listTags } from "../../src/utils/registry-api.js";
+import {
+  defaultProjectConfigPath as sharedDefaultProjectConfigPath,
+  isManagedConfigPath as sharedIsManagedConfigPath,
+  managedProjectsDir as sharedManagedProjectsDir,
+  readProjects as sharedReadProjects,
+  resolveProjectsFile as sharedResolveProjectsFile,
+  resolveStoredConfigPath as sharedResolveStoredConfigPath,
+  slugifyProjectName as sharedSlugifyProjectName,
+  uniqueManagedConfigPath as sharedUniqueManagedConfigPath,
+  writeProjects as sharedWriteProjects,
+} from "../../src/utils/projects.js";
 import { attachSshTerminal } from "./ssh-terminal.js";
 
 // ---------------------------------------------------------------- paths ---
@@ -124,9 +135,12 @@ export function parseDotEnv(text) {
   return out;
 }
 
+// Registry location: an explicit PROJECTS_FILE wins (absolute, or relative
+// to the repo root for dev checkouts); otherwise the registry lives next to
+// the global config, so every GUI on this machine (dev server, desktop app)
+// shares one store. Shared with the CLI (src/utils/projects.js).
 function resolveProjectsFile(raw) {
-  const value = raw && String(raw).trim() ? String(raw).trim() : "web/projects.json";
-  return path.isAbsolute(value) ? value : path.join(REPO_ROOT, value);
+  return sharedResolveProjectsFile(raw);
 }
 
 /**
@@ -201,7 +215,7 @@ export function loadEnvConfig() {
     adminEmail: get("ADMIN_EMAIL", ""),
     adminPassword: get("ADMIN_PASSWORD", ""),
     port: Number.isInteger(port) && port > 0 ? port : 3000,
-    projectsFile: resolveProjectsFile(get("PROJECTS_FILE", "web/projects.json")),
+    projectsFile: resolveProjectsFile(get("PROJECTS_FILE", "")),
     allowedOrigin: get("ALLOWED_ORIGIN", "").trim(),
     envFile: ROOT_ENV_FILE,
   };
@@ -266,28 +280,63 @@ export function newId() {
 }
 
 export function readProjects(projectsFile) {
-  try {
-    if (!fs.existsSync(projectsFile)) return [];
-    const data = JSON.parse(fs.readFileSync(projectsFile, "utf8"));
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
+  return sharedReadProjects(projectsFile);
 }
 
 export function writeProjects(projectsFile, projects) {
-  fs.mkdirSync(path.dirname(projectsFile), { recursive: true });
-  fs.writeFileSync(projectsFile, `${JSON.stringify(projects, null, 2)}\n`);
+  return sharedWriteProjects(projectsFile, projects);
 }
 
-/** On startup, an empty registry auto-registers the repo's own config. */
+/**
+ * One-time carry-over from the legacy dev registry (web/projects.json) into
+ * the shared store. Copies entries verbatim, resolving relative config paths
+ * against the repo root they were stored from. Best effort: any failure (or
+ * an empty legacy file) leaves the target untouched. Returns true when
+ * entries were migrated.
+ */
+export function migrateProjectsFile(targetFile, legacyFile) {
+  try {
+    if (fs.existsSync(targetFile)) return false;
+    if (!fs.existsSync(legacyFile)) return false;
+    const data = JSON.parse(fs.readFileSync(legacyFile, "utf8"));
+    if (!Array.isArray(data) || data.length === 0) return false;
+    const migrated = data
+      .filter((p) => p && typeof p === "object" && !Array.isArray(p))
+      .map((p) => {
+        const entry = { ...p };
+        const raw = typeof entry.configPath === "string" ? entry.configPath.trim() : "";
+        if (raw && !path.isAbsolute(raw)) entry.configPath = path.resolve(REPO_ROOT, raw);
+        return entry;
+      });
+    if (migrated.length === 0) return false;
+    writeProjects(targetFile, migrated);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** On startup, an empty registry auto-registers a starter project. The
+ * config is a personal copy under the global dir — never the repo/bundle
+ * template, whose path is neither writable nor stable in installs. */
 export function ensureDefaultProject(projectsFile) {
   const projects = readProjects(projectsFile);
   if (projects.length === 0) {
+    let configPath = path.join(REPO_ROOT, "config.yaml");
+    try {
+      const seed = path.join(globalConfigDir(), "projects", "my-project", "config.yaml");
+      if (!fs.existsSync(seed)) {
+        fs.mkdirSync(path.dirname(seed), { recursive: true });
+        fs.copyFileSync(configPath, seed);
+      }
+      configPath = seed;
+    } catch {
+      // Fall back to the template itself.
+    }
     projects.push({
       id: newId(),
       name: "my-project",
-      configPath: path.join(REPO_ROOT, "config.yaml"),
+      configPath,
     });
     writeProjects(projectsFile, projects);
   }
@@ -299,35 +348,27 @@ function findProject(projectsFile, projectId) {
 }
 
 function resolveStoredConfigPath(configPath) {
-  const raw = String(configPath ?? "").trim();
-  if (!raw) return null;
-  return path.isAbsolute(raw) ? raw : path.join(REPO_ROOT, raw);
+  return sharedResolveStoredConfigPath(configPath);
 }
 
 /**
  * Filesystem + k8s-safe slug from a display name (DNS-1123 label style).
  * Mirrors deriveProjectName(): lowercase, non [a-z0-9-] -> "-", collapse,
  * trim dashes, cap at 63 chars, fallback to "project".
+ * Shared with the CLI (src/utils/projects.js).
  */
 export function slugifyProjectName(name) {
-  let slug = String(name ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!slug) slug = "project";
-  if (slug.length > 63) slug = slug.slice(0, 63).replace(/-+$/g, "") || "project";
-  return slug;
+  return sharedSlugifyProjectName(name);
 }
 
 /** Folder holding auto-managed per-project configs: <globalDir>/projects. */
 export function managedProjectsDir() {
-  return path.join(globalConfigDir(), "projects");
+  return sharedManagedProjectsDir();
 }
 
 /** Default config file for an auto-managed project slug. */
 export function defaultProjectConfigPath(slug) {
-  return path.join(managedProjectsDir(), slug, "config.yaml");
+  return sharedDefaultProjectConfigPath(slug);
 }
 
 /**
@@ -335,10 +376,7 @@ export function defaultProjectConfigPath(slug) {
  * auto-assigned, not a user-supplied custom path). Such paths follow renames.
  */
 export function isManagedConfigPath(configPath) {
-  const resolved = path.resolve(String(configPath ?? ""));
-  const base = path.resolve(managedProjectsDir());
-  const rel = path.relative(base, resolved);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  return sharedIsManagedConfigPath(configPath);
 }
 
 /**
@@ -347,20 +385,7 @@ export function isManagedConfigPath(configPath) {
  * existing file on disk (e.g. leftovers from a removed entry).
  */
 export function uniqueManagedConfigPath(projects, baseSlug, excludeId = null) {
-  const takenPaths = new Set(
-    (projects ?? [])
-      .filter((p) => p.id !== excludeId)
-      .map((p) => path.resolve(String(p.configPath ?? "")))
-  );
-  let slug = baseSlug;
-  let n = 1;
-  while (true) {
-    const candidate = defaultProjectConfigPath(slug);
-    const resolved = path.resolve(candidate);
-    if (!takenPaths.has(resolved) && !fs.existsSync(candidate)) return { slug, configPath: candidate };
-    n += 1;
-    slug = `${baseSlug}-${n}`;
-  }
+  return sharedUniqueManagedConfigPath(projects, baseSlug, excludeId);
 }
 
 /**
@@ -844,7 +869,7 @@ export function captureOutput(fn) {
 
 // ------------------------------------------------------------ job argv map ---
 // Pure mapping of {op, args} to CLI argv for `node src/index.js [...]`.
-// Global flags (-c/-p/--tag) precede the subcommand (positional options).
+// Global flags (-c/--project-name/--tag) precede the subcommand (positional options).
 
 export function buildJobArgv(op, args = {}, opts = {}) {
   const a = args ?? {};
@@ -853,7 +878,7 @@ export function buildJobArgv(op, args = {}, opts = {}) {
   const tagOpt = a.tag ?? a.tagOverride;
   const pre = [];
   if (configPath) pre.push("-c", configPath);
-  if (has(a.project ?? a.projectOverride)) pre.push("-p", a.project ?? a.projectOverride);
+  if (has(a.project ?? a.projectOverride)) pre.push("--project-name", a.project ?? a.projectOverride);
 
   switch (op) {
     case "setup": {
@@ -2048,6 +2073,7 @@ function serveStatic(req, res, method) {
 // ----------------------------------------------------------------- start ---
 
 export function startServer(env = loadEnvConfig()) {
+  migrateProjectsFile(env.projectsFile, path.join(REPO_ROOT, "web", "projects.json"));
   ensureDefaultProject(env.projectsFile);
   const server = createServer(env);
   server.listen(env.port, () => {

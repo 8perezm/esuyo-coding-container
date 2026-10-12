@@ -16,7 +16,7 @@
     "dev:client": "npm --prefix web/client run dev",
     "build:gui": "npm --prefix web/client run build",
     "start:gui": "node web/server/server.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.* web/server/*.test.mjs web/client/src/**/*.test.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Esuyo Coding Container</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  main {
+    width: 340px;
+    padding: 32px 28px;
+    background: #1e293b;
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { font-size: 13px; line-height: 1.5; color: #94a3b8; margin: 0 0 20px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 14px 0 6px; color: #cbd5e1; }
+  input {
+    width: 100%;
+    padding: 9px 11px;
+    font-size: 14px;
+    border: 1px solid #475569;
+    border-radius: 7px;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  input:focus { outline: 2px solid #38bdf8; border-color: #38bdf8; }
+  button {
+    width: 100%;
+    margin-top: 22px;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 7px;
+    background: #0284c7;
+    color: #fff;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #0369a1; }
+  button:disabled { opacity: 0.6; cursor: default; }
+  #error { min-height: 20px; margin-top: 12px; font-size: 13px; color: #fca5a5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Create your sign-in</h1>
+  <p>This account lives only on this computer and unlocks your dashboard. You will stay signed in until you sign out.</p>
+  <form id="setup-form">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required autofocus />
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+    <label for="confirm">Confirm password</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" required />
+    <button id="submit" type="submit">Continue</button>
+    <div id="error" role="alert" aria-live="polite"></div>
+  </form>
+</main>
+<script>
+  const form = document.getElementById("setup-form");
+  const errorBox = document.getElementById("error");
+  const submit = document.getElementById("submit");
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorBox.textContent = "";
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const confirm = document.getElementById("confirm").value;
+    if (!email) {
+      errorBox.textContent = "Enter a valid email address.";
+      return;
+    }
+    if (password.length < 8) {
+      errorBox.textContent = "Password must be at least 8 characters.";
+      return;
+    }
+    if (password !== confirm) {
+      errorBox.textContent = "Passwords do not match.";
+      return;
+    }
+    submit.disabled = true;
+    try {
+      const result = await window.desktopSetup.saveSetup(email, password);
+      if (!result || !result.ok) {
+        errorBox.textContent = (result && result.error) || "Could not save. Try again.";
+        submit.disabled = false;
+      }
+      // On success the main process closes this window and opens the app.
+    } catch {
+      errorBox.textContent = "Could not save. Try again.";
+      submit.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

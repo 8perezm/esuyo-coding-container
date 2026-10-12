@@ -194,7 +194,7 @@ export function resolveDefaultConfigPath(explicit) {
  *   1. hardcoded DEFAULTS
   *   2. global config  (~/.config/coding-container/config.yaml, if present)
  *   3. local project config (configPath)
- *   4. CLI overrides (e.g. -p/--project, --tag)
+  *   4. CLI overrides (e.g. --project-name, --tag)
  *
  * The cluster is a layer too, but it is read by the deploy/system commands,
  * not here: in global mode the image tag floats on the coding-system

@@ -16,6 +16,7 @@ Every `coding-container` command and its most useful flags.
 | `coding-container validate` | Load and validate the config without changing anything (`--manifest` prints the rendered k8s manifests) |
 | `coding-container delete` | Remove deployment, service, Ingress, `<project>-ssh` ConfigMap and `<project>-env` Secret, and the SSH alias (alias: `destroy`) |
 | `coding-container gc` | Delete old tags from the project's custom image repo (custom mode only; global-mode projects: use `system gc`) |
+| `coding-container projects list` | List registered projects from the shared registry (same store the GUI uses; any SLUG, NAME or ID works with `-p/--project`) |
 | `coding-container system init` | One-time: create the `coding-system` ConfigMap in `k8s.namespace` on a fresh cluster (global mode) |
 | `coding-container system get` | Show current/previous/maxEver/keep and the resolved global image |
 | `coding-container system list` | List the global repo's registry tags, semver-sorted (read-only) |
@@ -28,8 +29,14 @@ Useful flags:
 ```sh
 # Global (before the command)
 -c, --config <file>    use a different config (default: ./config.yaml if present)
--p, --project <name>   override the project name
+-p, --project <slug|name|id>  select a project from the shared registry (see 'projects list'; cannot be combined with -c)
+    --project-name <name>  override the project name
     --tag <tag>        pin the image tag (global mode: semver; custom mode: required if unset in config)
+
+# examples
+coding-container projects list
+coding-container --project esuyo-mapping deploy
+coding-container --project "Esuyo Mapping" validate
 
 # create
     --skip-build       reuse the locally built image
@@ -55,14 +62,17 @@ Useful flags:
     --dry-run          list what would be deleted without deleting anything
 
 # system create
-    --tag <tag>        the new version to publish (semver, > maxEver, not yet in the registry; default: maxEver patch +1)
+    --tag <tag>        the new version to publish (semver, > maxEver, not yet in the registry; omit for maxEver patch +1)
 
 # system init
     --tag <tag>        the initial version (semver)
     --keep <n>         the gc window to store in the ConfigMap (default: 10)
 
+# projects list
+    --json           print the registry as JSON (slug, name, id, configPath, file-exists flag)
+
 # system rollback
-    [tag]              version to roll back to (default: 'previous')
+     [tag]              version to roll back to (default: 'previous')
 ```
 
 ## See also

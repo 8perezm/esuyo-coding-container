@@ -1,0 +1,27 @@
+{
+  "name": "@esuyo/coding-container-desktop",
+  "version": "1.0.3",
+  "private": true,
+  "description": "Installable desktop shell for the coding-container web GUI (Electron). The GUI and CLI run unchanged inside the window.",
+  "author": "Esuyo",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder -p never",
+    "dist:win": "electron-builder --win -p never",
+    "dist:win-portable": "electron-builder --win portable -p never",
+    "dist:mac": "electron-builder --mac -p never",
+    "dist:linux": "electron-builder --linux -p never"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "electron-updater": "^6.8.9",
+    "js-yaml": "^4.1.0",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "27.0.0-alpha.10"
+  }
+}

@@ -596,6 +596,54 @@ a {
   background-color: var(--bg-row-hover);
 }
 
+/* ---- Frameless desktop window controls (Electron only) ---- */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 0;
+  margin-left: 8px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.window-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  min-height: 60px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.window-control-button:hover {
+  background-color: var(--bg-row-hover);
+}
+
+.window-control-button.window-control-close:hover {
+  background-color: #e81123;
+  color: #ffffff;
+}
+
+/* Frameless drag region: the header becomes the title bar inside the
+   desktop app. Interactive elements stay clickable. */
+.electron .app-header {
+  -webkit-app-region: drag;
+  app-region: drag;
+  padding-right: 0;
+  user-select: none;
+}
+
+.electron .app-header button,
+.electron .app-header a {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 /* ---- Tabs (shadcn-style) ---- */
 .tabs-list {
   display: inline-flex;

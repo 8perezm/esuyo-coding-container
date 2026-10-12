@@ -7,6 +7,7 @@ Setup and contribution guide for working on the `coding-container` CLI itself.
 - Node.js >= 18 (ESM, `structuredClone`)
 - Docker, `kubectl` (pointed at your Kubernetes cluster), and an OpenSSH toolchain (`ssh`, `ssh-keygen`) on `PATH`
 - Access to the container registry and the NFS server for end-to-end runs
+- For the web GUI: the client has its own install (`web/client/package.json`, React + Vite + Tailwind)
 
 ## Run from source
 
@@ -24,14 +25,36 @@ coding-container --help
 
 (`npm unlink -g coding-container` to remove the global link.)
 
-Config resolution (`resolveDefaultConfigPath()` in `src/config.js`): an explicit `-c/--config` wins, then `./config.yaml` in the current working directory, then `config.yaml` at the repo root. The project config is layered over the global config at `~/.config/coding-container/config.yaml`. Relative config paths resolve against each config file's own directory, so you can run commands from any folder.
+Config resolution (`resolveDefaultConfigPath()` in `src/config.js`): an explicit `-c/--config` wins, then `./config.yaml` in the current working directory, then `config.yaml` at the repo root. The `-p/--project` flag instead selects a registered project from the shared registry (`<globalDir>/projects.json`, same store the GUI uses; see `src/utils/projects.js`). The project config is layered over the global config at `~/.config/<leaf>/config.yaml` (leaf default `coding-container`, per-checkout via `CODING_CONFIG_LEAF` in the repo-root `.env`). Relative config paths resolve against each config file's own directory, so you can run commands from any folder.
+
+## Run the web GUI from source
+
+The GUI is two processes in dev, one in production:
+
+```sh
+npm --prefix web/client install   # first time only (separate lockfile)
+node web/dev.js                   # backend API + Vite frontend together
+node web/kill-dev.js              # kill orphaned dev servers holding the dev ports
+```
+
+Dev URLs: the frontend on `:3000`, the API on the `.env` `PORT` (default `3001`); Vite proxies `/api` (including terminal websockets) at the API. Production: `npm --prefix web/client run build` emits `web/client/dist/`, and `node web/server/server.js` (same `.env`) serves the API + the built SPA on one port. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` + `ADMIN_PASSWORD` first, or sign-in always fails. The dev launcher warns when `.env` is missing and refuses to start when `web/client/node_modules` is absent.
+
+## Run the desktop app from source
+
+```sh
+npm --prefix web/client run build   # refresh the bundled GUI (repo root)
+npm --prefix electron install       # first time only
+npm --prefix electron run dev
+```
+
+Dev uses the repo-root GUI build and keeps its sign-in under Electron's `userData` folder, so it never touches the repo `.env`. Installers (`dist:win`, `dist:mac`, `dist:linux`, portable) and signing placeholders are covered in [Desktop](./desktop.md) and `electron/README.md`.
 
 ## Configuration layering
 
 Understanding the merge order is essential when adding config:
 
-1. `DEFAULTS` in `src/config.js`: every key must exist here. Environment-specific keys (`image.registry`, `nfs.server`, `nfs.basePath`) are intentionally blank: they must come from the global config (created by `setup`) and `validate()` fails with a "run setup" message if they're missing.
-2. The **global config** `~/.config/coding-container/config.yaml` (honors `XDG_CONFIG_HOME`), if present, holds shared environment settings.
+1. `DEFAULTS` in `src/config.js`: every key must exist here. Environment-specific keys (`image.registry`, `nfs.server`, `nfs.basePath`) are intentionally blank: they must come from the global config (created by `setup`) and `validate()` fails with a "run setup" message if they're missing. The base-layer default namespace comes from `defaultNamespace()` (`CODING_NAMESPACE`, default `coding`).
+2. The **global config** `~/.config/<leaf>/config.yaml` (honors `XDG_CONFIG_HOME`; leaf from `CODING_CONFIG_LEAF` in the checkout `.env`), if present, holds shared environment settings.
 3. The **project config** passed via `-c` (defaults to `<repo>/config.yaml`) holds project-specific values.
 4. CLI flags: currently only `project` and `image.tag`, assembled in `cfgFrom()` in `src/index.js`.
 
@@ -72,6 +95,7 @@ Packaging gotchas the current Dockerfile already works around: Ubuntu 26.04 ship
   coding-container validate --manifest | kubectl apply --dry-run=client -f -
   ```
   (Add `--validate=false` to the kubectl call only when the API server is unreachable; OpenAPI download is otherwise required for validation.)
+- **GUI misbehaving:** the dev launcher tags each line (`[api]` / `[web]`). The API is the same CLI you already know — reproduce any failing job by copying its `$ node src/index.js ...` line from the job log and running it in a terminal. `GET /api/health` tells you whether the backend is up; a `{"message":"GUI not built"}` response on `/` means `web/client/dist` was never built.
 - **Check the live state:**
   ```sh
   kubectl -n coding get deploy,svc,cm,pod -l coding-container=true
@@ -100,9 +124,10 @@ npm test
 node --test test/gc.test.js     # a single file
 ```
 
-- Pure unit tests cover `planGc`/`imageTag` (`test/gc.test.js`), semver (`test/semver.test.js`), the `coding-system` ConfigMap and the tag float (`test/system-config.test.js`), `${VAR}` expansion + Secret rendering (`test/secrets.test.mjs`), docker-credential resolution (`test/registry.test.mjs`), NodePort ownership (`test/nodeport-owner.test.mjs`), and the `nfs.volumes` / `web.ports` / `sidecars` validators + manifest renderers (`test/volumes.test.mjs`, `test/web-nodeports.test.mjs`, `test/sidecar-nodeports.test.mjs`).
+- Pure unit tests cover `planGc`/`imageTag` (`test/gc.test.js`), semver (`test/semver.test.js`), the `coding-system` ConfigMap and the tag float (`test/system-config.test.js`), `${VAR}` expansion + Secret rendering (`test/secrets.test.mjs`), docker-credential resolution (`test/registry.test.mjs`), NodePort ownership (`test/nodeport-owner.test.mjs`), node/pod JSON parsing + Ready-node picking (`test/node-ip.test.js`), checkout `.env` + `CODING_*` validation (`test/instance-env.test.mjs`), and the `nfs.volumes` / `web.ports` / `sidecars` validators + manifest renderers (`test/volumes.test.mjs`, `test/web-nodeports.test.mjs`, `test/sidecar-nodeports.test.mjs`).
 - `test/dockerfile-lazy.test.mjs` pins the lazy-Dockerfile contract: `loadConfig` succeeds with no Dockerfile anywhere on disk, while `buildImage` fails fast on a missing Dockerfile/context.
 - Integration tests (`test/registry-api.test.mjs`, `test/cli-gc.test.mjs`, `test/cli-system.test.mjs`) start an in-process mock Docker Registry and stub the cluster/toolchain by pointing `KUBECTL_BIN` at a `.js` script and `DOCKER_BIN` at a `.js` script, so the real CLI runs end-to-end without a cluster.
+- GUI tests run in the same `npm test` glob: backend `web/server/server.test.mjs` (auth, registry, validate/manifest drafts, job argv, cluster endpoints) and `web/server/ssh-terminal.test.mjs` (routing, frame codec, upgrade flow), frontend `web/client/src/**/*.test.mjs` (job helpers), and root-level `test/web-client-*.test.mjs` (ops, pages, projects/deploy flows, images/system, system jobs).
 - Optional personal values: copy `test/fixtures.local.example.mjs` to the gitignored `test/fixtures.local.mjs`; `test/personal.mjs` then feeds your real registry/NFS into the same assertions. Leave it absent in CI.
 
 When adding a command or manifest renderer, add a hermetic test next to the existing ones; never hit a real cluster or registry from `npm test`.
@@ -111,4 +136,6 @@ When adding a command or manifest renderer, add a hermetic test next to the exis
 
 - ES modules only (`import`/`export`), Node built-ins via `node:` prefix.
 - Keep `src/utils` free of command knowledge; commands orchestrate, utils implement.
-- No new runtime dependencies without good reason. The CLI deliberately shells out to docker/kubectl/ssh instead of embedding SDKs.
+- No new runtime dependencies without good reason. The CLI deliberately shells out to docker/kubectl/ssh instead of embedding SDKs. The GUI backend adds only `js-yaml` + `ssh2` (already CLI dependencies); the terminal WebSocket is hand-rolled on builtins, not the `ws` package.
+- GUI-visible copy never mentions the CLI: no commands, flags, or `node src/index.js` renderings in pages, buttons, or desktop windows (`AGENTS.md`). Docs under `./docs` may show commands; the shipped UI must not.
+- On Windows, never `Start-Process npm` (fails with `%1 is not a valid Win32 application`); run the underlying script directly (`node web/dev.js`). Bound every potentially-hanging call (`--test-timeout` for `node --test`, `Wait-Process -Timeout` for detached launches) and treat ~60 s of silence as hung.

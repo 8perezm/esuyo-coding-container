@@ -66,11 +66,11 @@ test("buildJobArgv: deploy/create/delete/gc map op+args to CLI argv", () => {
     ),
     ["-c", "/c/c.yaml", "--tag", "v1.2.3", "create", "--skip-build", "--skip-push"]
   );
-  // -p/--tag global overrides precede the subcommand.
+  // --project-name/--tag global overrides precede the subcommand.
   assert.deepEqual(buildJobArgv("build", { project: "demo" }, { configPath: "/c.yaml" }), [
     "-c",
     "/c.yaml",
-    "-p",
+    "--project-name",
     "demo",
     "build",
   ]);

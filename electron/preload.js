@@ -1,0 +1,104 @@
+"use strict";
+// Runs in the window before the web UI loads (context isolation on, no Node
+// access for the page itself).
+//
+// Two jobs:
+//   1. Watch the page's own sign-in / password-change / sign-out requests and
+//      report them to the main process, so the encrypted stored sign-in
+//      stays in sync. The server and the web UI are unchanged.
+//   2. Expose a minimal setup API used only by the first-run window.
+
+const { contextBridge, ipcRenderer } = require("electron");
+
+const AUTH_PATHS = new Set(["/api/login", "/api/logout", "/api/change-password"]);
+
+function pathnameOf(input) {
+  try {
+    if (typeof input === "string") return new URL(input, window.location.href).pathname;
+    if (input instanceof Request) return new URL(input.url, window.location.href).pathname;
+    if (input instanceof URL) return input.pathname;
+  } catch {
+    // Not a parseable URL: not ours.
+  }
+  return "";
+}
+
+function methodOf(input, init) {
+  const method =
+    (init && init.method) || (input instanceof Request && input.method) || "GET";
+  return String(method).toUpperCase();
+}
+
+async function requestPayload(input, init) {
+  try {
+    let raw = init && init.body;
+    if (raw === undefined && input instanceof Request) raw = await input.clone().text();
+    if (typeof raw !== "string" || !raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function reportAuthRequest(pathname, payload) {
+  try {
+    if (pathname === "/api/logout") {
+      ipcRenderer.send("desktop:auth-logged-out");
+    } else if (
+      pathname === "/api/login" &&
+      payload &&
+      typeof payload.email === "string" &&
+      typeof payload.password === "string"
+    ) {
+      ipcRenderer.send("desktop:auth-login", {
+        email: payload.email,
+        password: payload.password,
+      });
+    } else if (
+      pathname === "/api/change-password" &&
+      payload &&
+      typeof payload.newPassword === "string"
+    ) {
+      ipcRenderer.send("desktop:auth-password-changed", { password: payload.newPassword });
+    }
+  } catch {
+    // Sync is best effort; never disturb the page.
+  }
+}
+
+if (typeof window.fetch === "function") {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function desktopFetch(input, init) {
+    const response = await originalFetch(input, init);
+    try {
+      const pathname = pathnameOf(input);
+      if (AUTH_PATHS.has(pathname) && methodOf(input, init) === "POST" && response.ok) {
+        reportAuthRequest(pathname, await requestPayload(input, init));
+      }
+    } catch {
+      // Never disturb the page.
+    }
+    return response;
+  };
+}
+
+contextBridge.exposeInMainWorld("desktopSetup", {
+  saveSetup: (email, password) => ipcRenderer.invoke("desktop:save-setup", { email, password }),
+});
+
+// Frameless window controls for the main window. Only present inside the
+// desktop app: in a normal browser this bridge never loads, so the web UI
+// checks `window.desktop?.isDesktop` before showing the buttons.
+contextBridge.exposeInMainWorld("desktop", {
+  isDesktop: true,
+  minimize: () => ipcRenderer.send("desktop:window-minimize"),
+  toggleMaximize: () => ipcRenderer.send("desktop:window-toggle-maximize"),
+  close: () => ipcRenderer.send("desktop:window-close"),
+  isMaximized: () => ipcRenderer.invoke("desktop:window-is-maximized"),
+  onMaximizedChange: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, maximized) => callback(Boolean(maximized));
+    ipcRenderer.on("desktop:window-maximized", listener);
+    return () => ipcRenderer.removeListener("desktop:window-maximized", listener);
+  },
+});

@@ -1,0 +1,128 @@
+# Packaging for the Esuyo Coding Container desktop app.
+# Built from the electron/ folder; the GUI (web/) and CLI (src/) are bundled
+# unchanged. Run from electron/: `npm run dist:win`, `dist:mac`, `dist:linux`.
+#
+# Windows produces both NSIS (.exe, auto-updating via electron-updater) and
+# MSIX (.msix, updated via the Microsoft Store). The MSIX identity below is a
+# development placeholder: replace identityName / publisher /
+# publisherDisplayName with the Partner Center values before a Store
+# submission. Unsigned local builds need CSC_IDENTITY_AUTO_DISCOVERY=false.
+
+appId: com.esuyo.coding-container
+productName: Esuyo Coding Container
+
+directories:
+  output: dist
+
+toolsets:
+  winCodeSign: "1.1.0"
+
+files:
+  - from: .
+    to: .
+    filter:
+      - main.js
+      - preload.js
+      - setup.html
+      - server-launcher.mjs
+      - package.json
+  - from: ../src
+    to: src
+    filter:
+      - "**/*"
+  - from: ../web/server
+    to: web/server
+    filter:
+      - "**/*"
+  - from: ../web/client/dist
+    to: web/client/dist
+    filter:
+      - "**/*"
+  # Single files must be picked via a directory mapping with a filter; a
+  # file path in `from:` is silently ignored. Note: the root package.json is
+  # deliberately NOT bundled — src/index.js reads ../package.json for its
+  # version, and the desktop manifest at the bundle root carries the synced
+  # version (see electron/README).
+  - from: ..
+    to: .
+    filter:
+      - config.yaml
+      - Dockerfile
+  # Production dependencies only, allowlisted: an explicit node_modules
+  # mapping bypasses the automatic devDependencies pruning, so only the
+  # runtime closure is listed here (mirror electron/package.json
+  # "dependencies"; drift breaks the packaged app — the boot test catches it).
+  # None of these use native modules, so the strict native-binary check stays
+  # meaningful.
+  - from: node_modules
+    to: node_modules
+    filter:
+      - "argparse/**/*"
+      - "asn1/**/*"
+      - "bcrypt-pbkdf/**/*"
+      - "commander/**/*"
+      - "debug/**/*"
+      - "electron-updater/**/*"
+      - "graceful-fs/**/*"
+      - "js-yaml/**/*"
+      - "jsonfile/**/*"
+      - "lazy-val/**/*"
+      - "lodash.escaperegexp/**/*"
+      - "lodash.isequal/**/*"
+      - "ms/**/*"
+      - "nan/**/*"
+      - "safer-buffer/**/*"
+      - "sax/**/*"
+      - "ssh2/**/*"
+      - "tiny-typed-emitter/**/*"
+      - "tweetnacl/**/*"
+      - "universalify/**/*"
+
+# No asar archive: the backend spawns CLI processes with the bundle root as
+# their working directory and resolves the Dockerfile/config next to it, so
+# it needs real files on disk, not an archive.
+asar: false
+
+win:
+  target:
+    - nsis
+    - msix
+    # Single-file exe that runs without installing (no install/uninstall
+    # cycle). For try-out and dev PCs; use NSIS for managed installs since
+    # auto-update is not supported for portable builds.
+    - portable
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+msix:
+  identityName: Esuyo.CodingContainer
+  publisher: CN=Esuyo
+  publisherDisplayName: Esuyo
+  applicationId: CodingContainer
+  displayName: Esuyo Coding Container
+
+portable:
+  # Distinct name: says what it is, and rebuilding never collides with a
+  # running copy of a previous portable build.
+  artifactName: "Esuyo Coding Container Portable-${version}.exe"
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  maintainer: Esuyo
+
+publish:
+  provider: github
+  owner: Esuyo
+  repo: esuyo-coding-container

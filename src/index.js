@@ -25,6 +25,13 @@ import {
 import { ensureKeyPair } from "./utils/keys.js";
 import { ensureProjectConfig } from "./utils/project.js";
 import { resolveDeployTag } from "./utils/system-config.js";
+import {
+  defaultProjectsFile,
+  readProjects,
+  resolveProjectRefOrThrow,
+  resolveStoredConfigPath,
+} from "./utils/projects.js";
+import { listProjects } from "./commands/projects.js";
 
 const program = new Command();
 
@@ -40,15 +47,43 @@ program
   // not swallowed by the global --tag.
   .enablePositionalOptions()
   .option("-c, --config <file>", "path to config yaml (default: ./config.yaml if present, else the repo's)")
-  .option("-p, --project <name>", "override the project name")
+  .option("-p, --project <slug|name|id>", "select a project from the shared registry (see 'projects list')")
+  .option("--project-name <name>", "override the project name")
   .option("--tag <tag>", "override the image tag");
+
+/**
+ * Which local config file to load: an explicit -c wins, else a -p/--project
+ * registry entry (same store the GUI uses), else ./config.yaml or the repo's.
+ * -c and -p together are an error, never a guess.
+ */
+function resolveSelectedConfigPath(globalOpts) {
+  if (globalOpts.config && globalOpts.project) {
+    throw new Error("Use either -c/--config or -p/--project, not both.");
+  }
+  if (globalOpts.project) {
+    const projectsFile = defaultProjectsFile();
+    const projects = readProjects(projectsFile);
+    const { project } = resolveProjectRefOrThrow(projects, globalOpts.project, projectsFile);
+    const configPath = resolveStoredConfigPath(project.configPath);
+    if (!configPath) {
+      throw new Error(`Project "${globalOpts.project}" has no configPath in ${projectsFile}.`);
+    }
+    if (!fs.existsSync(configPath)) {
+      throw new Error(
+        `Project "${globalOpts.project}" config not found: ${configPath}\nRun "coding-container projects list" to see all projects.`
+      );
+    }
+    return configPath;
+  }
+  return resolveDefaultConfigPath(globalOpts.config);
+}
 
 function cfgFrom(ctx) {
   const globalOpts = program.opts();
   const overrides = {};
-  if (globalOpts.project) overrides.project = globalOpts.project;
+  if (globalOpts.projectName) overrides.project = globalOpts.projectName;
   if (globalOpts.tag) overrides.image = { tag: globalOpts.tag };
-  const cfg = loadConfig(resolveDefaultConfigPath(globalOpts.config), overrides);
+  const cfg = loadConfig(resolveSelectedConfigPath(globalOpts), overrides);
   // First-run nudge: shown once, on stderr, until the global config exists.
   if (process.argv[2] !== "setup" && !fs.existsSync(globalConfigPath())) {
     console.error(
@@ -78,14 +113,14 @@ program
   .option("--skip-push", "skip the docker push step")
   .action(async (opts) => {
     const globalOpts = program.opts();
-    // No explicit -c and no ./config.yaml: scaffold one (project name from
-    // the folder, first free NodePort) and proceed with it.
-    if (!globalOpts.config) {
+    // No explicit -c/-p and no ./config.yaml: scaffold one (project name from
+    // the folder or --project-name, first free NodePort) and proceed with it.
+    if (!globalOpts.config && !globalOpts.project) {
       const cwdConfig = path.resolve(process.cwd(), "config.yaml");
       if (!fs.existsSync(cwdConfig)) {
         const { created, project, nodePort } = ensureProjectConfig(
           process.cwd(),
-          globalOpts.project
+          globalOpts.projectName
         );
         if (created) {
           console.log(
@@ -150,6 +185,18 @@ list
   .option("--dry-run", "show what would change without writing anything")
   .action(async (opts) => {
     await listUpdateSsh({ dryRun: opts.dryRun });
+  });
+
+const projects = program
+  .command("projects")
+  .description("work with the shared project registry (same store the GUI uses)");
+
+projects
+  .command("list")
+  .description("list registered projects (any SLUG, NAME or ID works with -p/--project)")
+  .option("--json", "print the registry as JSON (includes slugs and file-exists flags)")
+  .action((opts) => {
+    listProjects({ json: opts.json });
   });
 
 program

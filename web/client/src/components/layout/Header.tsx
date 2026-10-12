@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { WindowControls } from './WindowControls';
+import { isDesktopApp } from '../../lib/desktop';
 import type { Theme } from '../../theme/useTheme';
 
 interface HeaderProps {
@@ -10,6 +13,14 @@ interface HeaderProps {
 }
 
 export function Header({ theme, onToggleTheme, onOpenSidebar }: HeaderProps) {
+  // Desktop detection is client-only: the preload script exposes
+  // window.desktop, which never exists in a normal browser.
+  const [showWindowControls, setShowWindowControls] = useState(false);
+  useEffect(() => {
+    setShowWindowControls(isDesktopApp());
+    if (isDesktopApp()) document.documentElement.classList.add('electron');
+  }, []);
+
   return (
     <header className="app-header" data-ref="app-header">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} data-ref="header-brand-group">
@@ -29,6 +40,7 @@ export function Header({ theme, onToggleTheme, onOpenSidebar }: HeaderProps) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} data-ref="header-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        {showWindowControls ? <WindowControls /> : null}
       </div>
     </header>
   );

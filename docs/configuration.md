@@ -2,10 +2,26 @@
 
 How settings are layered, how to work on multiple projects, and how workspaces are stored on the NAS.
 
+## Checkout identity (the root `.env`)
+
+Each checkout carries its own identity in a gitignored `.env` file at the repo root (copy `.env.example`). It keeps repeated checkouts (prod vs. dev) from sharing state:
+
+| Key | Default | Effect |
+|---|---|---|
+| `CODING_CONFIG_LEAF` | `coding-container` | global dir is `~/.config/<leaf>` (config, Dockerfile, keys, projects registry) |
+| `CODING_SSH_PREFIX` | `coding-` | SSH aliases are `<prefix><project>` |
+| `CODING_NAMESPACE` | `coding` | default k8s namespace (config files still override it) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | GUI sign-in (see [GUI](./gui.md)) |
+| `PORT` | `3001` | GUI server port |
+| `PROJECTS_FILE` | — | registry override (absolute, or relative to the repo root); default is `projects.json` next to the global config |
+| `ALLOWED_ORIGIN` | — | optional single-origin CORS for the GUI API |
+
+Real environment variables win over `.env`, and `.env` never overwrites keys already in the environment. Example dev instance: `CODING_CONFIG_LEAF=coding-container-dev`, `CODING_SSH_PREFIX=coding-dev-`, `CODING_NAMESPACE=coding-dev`.
+
 ## Layering (lowest to highest priority)
 
 1. **Built-in defaults:** sensible generic values. Environment-specific ones (registry, NFS server, NFS base path) are intentionally left unset and are captured by `coding-container setup`.
-2. **Global config:** `~/.config/coding-container/config.yaml` (honors `XDG_CONFIG_HOME`), created by `coding-container setup`. Shared by every project: registry, image build, namespace, resources, NFS, SSH. Your SSH key pair lives next to it in `~/.config/coding-container/keys/`, and the image `Dockerfile` is copied next to it on setup (so this config is self-contained and never points at the repo).
+2. **Global config:** `~/.config/<leaf>/config.yaml` (honors `XDG_CONFIG_HOME`; leaf from `CODING_CONFIG_LEAF`), created by `coding-container setup`. Shared by every project: registry, image build, namespace, resources, NFS, SSH. Your SSH key pair lives next to it in `~/.config/<leaf>/keys/`, and the image `Dockerfile` is copied next to it on setup (so this config is self-contained and never points at the repo).
 3. **Project config:** `config.yaml` in the folder you run the command from (picked up automatically; override with `-c`, else the repo's own `config.yaml` is used). `create` scaffolds it if missing. Only what differs per project:
 
    ```yaml
@@ -17,7 +33,7 @@ How settings are layered, how to work on multiple projects, and how workspaces a
        - { port: 3000, hosts: [my-web.example.com, www.example.com] }
    ```
 
-4. **CLI flags:** `-p/--project` and `--tag` win over everything.
+4. **CLI flags:** `--project-name` and `--tag` win over everything. `-p/--project` selects which registered project to run (see `coding-container projects list`).
 
 Any key from any layer can be overridden in a higher layer. The global config for this machine looks like:
 
@@ -88,6 +104,18 @@ k8s:
 ```
 
 `-c <file>` still works when you don't want to `cd` (e.g. `coding-container -c C:\work\api\config.yaml ssh`). Each project gets its own pod, service, and NAS subfolder (`/workspaces/my-api`). Global-mode projects share the same image and (by default) the same key pair; custom-mode projects build their own image (`registry/coding-<project>` unless `image.name` is set), and `ssh.keyDir` opts a project into its own key pair.
+
+## The shared projects registry
+
+The CLI and the web GUI use one registry: a JSON array of `{ id, name, configPath }` at `<globalDir>/projects.json` (`PROJECTS_FILE` overrides the location; every GUI on the machine shares it by default). GUI-created projects get an auto-assigned config under `<globalDir>/projects/<slug>/config.yaml` that follows renames; explicitly supplied paths stay put.
+
+```sh
+coding-container projects list            # SLUG  NAME  ID  CONFIG table
+coding-container projects list --json     # machine-readable (includes file-exists flags)
+coding-container -p <slug|name|id> deploy # run any config-dependent command against a registered project
+```
+
+`-p/--project` accepts the slug, the display name (exact, then case-insensitive), or the id (exact or unique ≥4-char prefix). It cannot be combined with `-c`. A ref that matches nothing prints every available slug plus the registry path.
 
 **Pinning the pod to a node.** By default the scheduler picks a node. To force placement on one named node (e.g. the one with the NAS mount or a GPU), set `k8s.nodeName` (`kubectl get nodes` for names):
 
