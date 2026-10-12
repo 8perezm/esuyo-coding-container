@@ -3,11 +3,29 @@ name: Desktop builds
 # Installable desktop app (Electron). Builds unsigned installers per OS,
 # including MSIX on Windows. For signed/Store releases, add signing secrets
 # and replace the MSIX placeholder identity in electron/electron-builder.yml.
+#
+# Triggers:
+# - `v*` tags: created automatically by the publish workflow on every push
+#   to main, so each GitHub Release gets its installers attached.
+# - `desktop-v*` tags: manual desktop-only rebuild without an npm publish.
+# - `release published`: fires after the publish workflow creates the
+#   GitHub Release, attaching the installers to that release.
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach installers to (e.g. v1.0.6). Leave empty for a test build with no upload.'
+        required: false
+        default: ''
   push:
     tags:
+      - "v*"
       - "desktop-v*"
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -30,6 +48,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # Backfill runs (dispatch with a tag input) build the tagged code.
+          ref: ${{ inputs.tag || '' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -43,6 +64,21 @@ jobs:
 
       - name: Install desktop dependencies
         run: npm --prefix electron ci
+
+      - name: Sync desktop version to tag
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' || inputs.tag != ''
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          fi
+          TAG="${TAG#desktop-v}"
+          TAG="${TAG#v}"
+          if [ -n "$TAG" ]; then
+            npm --prefix electron version "$TAG" --no-git-tag-version --allow-same-version
+            echo "Synced electron version to $TAG"
+          fi
 
       - name: Build installers
         run: npm --prefix electron run ${{ matrix.script }}
@@ -62,3 +98,21 @@ jobs:
             electron/dist/*.AppImage
             electron/dist/*.deb
             electron/dist/*.yml
+
+      - name: Attach installers to GitHub Release
+        # Tag pushes (v*, desktop-v*), `release published` events, and
+        # dispatch runs with a tag input all land here; plain test
+        # dispatches without a tag skip this.
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' || inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || '' }}
+          files: |
+            electron/dist/*.exe
+            electron/dist/*.msix
+            electron/dist/*.dmg
+            electron/dist/*.zip
+            electron/dist/*.AppImage
+            electron/dist/*.deb
+            electron/dist/*.yml
+          fail_on_unmatched_files: false
