@@ -125,8 +125,6 @@ linux:
     - deb
   category: Development
   maintainer: Esuyo
-  # Reverse-DNS id so taskbars/docks associate the window with its launcher.
-  desktopName: com.esuyo.coding-container
 
 publish:
   provider: github
