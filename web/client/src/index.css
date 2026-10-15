@@ -180,7 +180,7 @@ a {
     top: 60px;
     left: 0;
     bottom: 0;
-    width: 260px;
+    width: var(--sidebar-width, 260px);
     display: flex;
     flex-direction: column;
     background-color: var(--bg-sidebar);
@@ -190,13 +190,36 @@ a {
 
   .app-main {
     margin-top: 60px;
-    margin-left: 260px;
+    margin-left: var(--sidebar-width, 260px);
     padding: 24px 32px;
     min-height: calc(100vh - 60px);
     overflow-x: hidden;
   }
 
   /* ---- Nav items ---- */
+  .sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    bottom: 0;
+    width: 8px;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 31;
+    border-radius: 4px;
+  }
+
+  .sidebar-resize-handle:hover,
+  .sidebar-resize-handle:focus-visible {
+    background-color: var(--accent-ring);
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .sidebar-resize-handle-resizing {
+    background-color: var(--accent-ring);
+  }
+
   .nav-list {
     display: flex;
     flex-direction: column;
@@ -217,6 +240,19 @@ a {
     text-decoration: none;
     font-weight: 500;
     font-size: var(--font-size-md);
+    overflow: hidden;
+  }
+
+  .nav-item svg {
+    flex-shrink: 0;
+  }
+
+  .nav-item span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nav-item:hover {
@@ -535,6 +571,10 @@ a {
     transition: transform 180ms ease;
     top: 60px;
     box-shadow: var(--shadow-md);
+  }
+
+  .sidebar-resize-handle {
+    display: none;
   }
 
   .profile-grid {

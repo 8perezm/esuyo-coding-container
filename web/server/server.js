@@ -213,16 +213,24 @@ export function loadEnvConfig() {
   const port = Number.parseInt(get("PORT", "3401"), 10);
   const projectsFile = resolveProjectsFile(get("PROJECTS_FILE", ""));
   const authRaw = get("AUTH_FILE", "").trim();
+  const authFile = authRaw
+    ? path.isAbsolute(authRaw)
+      ? authRaw
+      : path.join(REPO_ROOT, authRaw)
+    : defaultAuthFile(projectsFile);
+  const jobsRaw = get("JOBS_FILE", "").trim();
+  const jobsFile = jobsRaw
+    ? path.isAbsolute(jobsRaw)
+      ? jobsRaw
+      : path.join(REPO_ROOT, jobsRaw)
+    : defaultJobsFile(projectsFile);
   return {
     adminEmail: get("ADMIN_EMAIL", ""),
     adminPassword: get("ADMIN_PASSWORD", ""),
     port: Number.isInteger(port) && port > 0 ? port : 3401,
     projectsFile,
-    authFile: authRaw
-      ? path.isAbsolute(authRaw)
-        ? authRaw
-        : path.join(REPO_ROOT, authRaw)
-      : defaultAuthFile(projectsFile),
+    authFile,
+    jobsFile,
     allowedOrigin: get("ALLOWED_ORIGIN", "").trim(),
     envFile: ROOT_ENV_FILE,
   };
@@ -715,19 +723,29 @@ function projectsFingerprint(projects) {
 /**
  * Parse `kubectl top nodes --no-headers` output.
  * Each line: NAME CPU(cores) CPU% MEMORY(bytes) MEMORY%.
+ * Unavailable readings show as `<unknown>` (e.g. NotReady nodes) and are
+ * normalized to null so callers render a dash instead.
  * Returns Map name -> { cpu, cpuPercent, memory, memoryPercent }.
  */
 export function parseTopNodes(text) {
+  const cleanValue = (v) => {
+    const s = String(v ?? "").trim();
+    return s === "" || s.toLowerCase() === "<unknown>" ? null : s;
+  };
+  const cleanPercent = (v) => {
+    const n = Number.parseInt(String(v ?? ""), 10);
+    return Number.isFinite(n) ? n : null;
+  };
   const map = new Map();
   for (const line of String(text ?? "").split(/\r?\n/)) {
     const parts = line.trim().split(/\s+/).filter(Boolean);
     if (parts.length < 5) continue;
     const [name, cpu, cpuPct, memory, memPct] = parts;
     map.set(name, {
-      cpu,
-      cpuPercent: Number.parseInt(cpuPct, 10),
-      memory,
-      memoryPercent: Number.parseInt(memPct, 10),
+      cpu: cleanValue(cpu),
+      cpuPercent: cleanPercent(cpuPct),
+      memory: cleanValue(memory),
+      memoryPercent: cleanPercent(memPct),
     });
   }
   return map;
@@ -1108,6 +1126,36 @@ function loadWorkloadConfig(p, entry, tagCache) {
   return cfg;
 }
 
+/**
+ * When a pod last (re)started: the most recent running container start time,
+ * falling back to the pod start time and then creation. Null when unknown.
+ * Used for the dashboard Age column ("when they were last restarted or run").
+ */
+export function podStartedAt(pod) {
+  try {
+    const all = [
+      ...(pod?.status?.containerStatuses ?? []),
+      ...(pod?.status?.initContainerStatuses ?? []),
+      ...(pod?.status?.ephemeralContainerStatuses ?? []),
+    ];
+    let latest = null;
+    for (const s of all) {
+      const started = s?.state?.running?.startedAt ?? null;
+      if (typeof started === "string" && started) {
+        if (!latest || started > latest) latest = started;
+      }
+    }
+    if (latest) return latest;
+    const podStart = pod?.status?.startTime;
+    if (typeof podStart === "string" && podStart) return podStart;
+    const created = pod?.metadata?.creationTimestamp;
+    if (typeof created === "string" && created) return created;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function fillWorkloadFromObjects(entry, cfg, { deploy, pods, podUsage, svc, metricsAvailable }) {
   if (!deploy) return entry;
   entry.deployed = true;
@@ -1138,6 +1186,7 @@ function fillWorkloadFromObjects(entry, cfg, { deploy, pods, podUsage, svc, metr
       cpu: live?.cpu ?? null,
       memory: live?.memory ?? null,
       createdAt: pod?.metadata?.creationTimestamp ?? null,
+      startedAt: podStartedAt(pod),
     };
   });
   try {
@@ -1510,8 +1559,122 @@ export function trimLogs(logs) {
 // ------------------------------------------------------------------ jobs ---
 // In-memory store: id -> { id, op, projectId, argv, status, exitCode, logs,
 // startedAt, finishedAt }. running | done | error.
+// The last 50 jobs are also persisted to jobs.json (next to the projects
+// registry) so /jobs isn't empty after a restart.
+
+export const MAX_PERSISTED_JOBS = 50;
+
+export function defaultJobsFile(projectsFile) {
+  const base = projectsFile ? path.dirname(projectsFile) : os.tmpdir();
+  return path.join(base, "jobs.json");
+}
 
 const jobs = new Map();
+let currentJobsFile = null;
+
+export function getJobsFile() {
+  return currentJobsFile;
+}
+
+export function clearJobs() {
+  jobs.clear();
+}
+
+function isValidPersistedJob(j) {
+  return (
+    j &&
+    typeof j === "object" &&
+    typeof j.id === "string" &&
+    typeof j.op === "string" &&
+    typeof j.startedAt === "string"
+  );
+}
+
+/** Load persisted jobs into memory. Running jobs are marked interrupted. */
+export function loadJobsFromDisk(file) {
+  const target = file ?? currentJobsFile;
+  if (!target) return 0;
+  let raw;
+  try {
+    if (!fs.existsSync(target)) return 0;
+    raw = fs.readFileSync(target, "utf8");
+  } catch {
+    return 0;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 0;
+  }
+  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.jobs) ? parsed.jobs : null;
+  if (!list) return 0;
+  let loaded = 0;
+  for (const j of list) {
+    if (!isValidPersistedJob(j)) continue;
+    if (jobs.has(j.id)) continue;
+    const entry = {
+      id: j.id,
+      op: j.op,
+      projectId: j.projectId ?? null,
+      argv: Array.isArray(j.argv) ? j.argv : [],
+      status: j.status ?? "done",
+      exitCode: typeof j.exitCode === "number" ? j.exitCode : null,
+      logs: typeof j.logs === "string" ? trimLogs(j.logs) : "",
+      startedAt: j.startedAt,
+      finishedAt: typeof j.finishedAt === "string" ? j.finishedAt : null,
+    };
+    if (entry.status === "running") {
+      entry.status = "error";
+      entry.finishedAt = new Date().toISOString();
+      entry.logs = trimLogs(`${entry.logs}\n(job interrupted: server restarted)\n`);
+    }
+    jobs.set(entry.id, entry);
+    loaded++;
+  }
+  // Keep only the latest 50 by startedAt.
+  const sorted = [...jobs.values()].sort((a, b) => (a.startedAt > b.startedAt ? -1 : 1));
+  const keep = new Set(sorted.slice(0, MAX_PERSISTED_JOBS).map((j) => j.id));
+  for (const id of [...jobs.keys()]) {
+    if (!keep.has(id)) jobs.delete(id);
+  }
+  pruneJobs();
+  return loaded;
+}
+
+/** Persist the latest 50 jobs (with logs) to disk, atomically. */
+export function saveJobsToDisk(file) {
+  const target = file ?? currentJobsFile;
+  if (!target) return false;
+  try {
+    const latest = [...jobs.values()]
+      .sort((a, b) => (a.startedAt > b.startedAt ? -1 : 1))
+      .slice(0, MAX_PERSISTED_JOBS);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(latest, null, 2)}\n`);
+    fs.renameSync(tmp, target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Point the store at a jobs file (clears memory, then loads). */
+export function setJobsFile(file) {
+  currentJobsFile = file || null;
+  jobs.clear();
+  if (currentJobsFile) loadJobsFromDisk(currentJobsFile);
+  return currentJobsFile;
+}
+
+function persistJobsBestEffort() {
+  try {
+    saveJobsToDisk();
+  } catch {
+    /* persistence must never break job execution */
+  }
+}
 
 function appendJobLog(job, chunk) {
   job.logs = trimLogs(`${job.logs}${chunk}`);
@@ -1539,6 +1702,7 @@ export function startJob(op, projectId, argv, cwd) {
   };
   jobs.set(job.id, job);
   pruneJobs();
+  persistJobsBestEffort();
 
   let child;
   try {
@@ -1548,6 +1712,7 @@ export function startJob(op, projectId, argv, cwd) {
     job.status = "error";
     job.finishedAt = new Date().toISOString();
     appendJobLog(job, `failed to spawn: ${err.message}\n`);
+    persistJobsBestEffort();
     return job;
   }
   appendJobLog(job, `$ node src/index.js ${argv.join(" ")}\n(cwd: ${cwd})\n\n`);
@@ -1557,11 +1722,13 @@ export function startJob(op, projectId, argv, cwd) {
     appendJobLog(job, `\nspawn error: ${err.message}\n`);
     job.status = "error";
     job.finishedAt = new Date().toISOString();
+    persistJobsBestEffort();
   });
   child.on("close", (code) => {
     job.exitCode = code;
     job.status = code === 0 ? "done" : "error";
     job.finishedAt = new Date().toISOString();
+    persistJobsBestEffort();
   });
   return job;
 }
@@ -1745,6 +1912,20 @@ export function createServer(env) {
     } catch {
       // Leave unset: requests fall back to legacy credentials.
     }
+  }
+  if (!env.jobsFile && projectsFile) {
+    try {
+      env.jobsFile = defaultJobsFile(projectsFile);
+    } catch {
+      // Persistence is best-effort; jobs still work in memory.
+    }
+  }
+  // Point the job store at this server's file (clears + reloads so test
+  // servers with different tmp dirs stay isolated).
+  try {
+    if (env.jobsFile) setJobsFile(env.jobsFile);
+  } catch {
+    /* best effort */
   }
 
   const server = http.createServer((req, res) => {
@@ -2785,6 +2966,7 @@ function serveStatic(req, res, method) {
 
 export function startServer(env = loadEnvConfig()) {
   if (!env.authFile) env.authFile = defaultAuthFile(env.projectsFile);
+  if (!env.jobsFile) env.jobsFile = defaultJobsFile(env.projectsFile);
   migrateLegacyToAuthFile(env);
   migrateProjectsFile(env.projectsFile, path.join(REPO_ROOT, "web", "projects.json"));
   ensureDefaultProject(env.projectsFile);

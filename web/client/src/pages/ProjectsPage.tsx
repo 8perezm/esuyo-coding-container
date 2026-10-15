@@ -58,13 +58,15 @@ function errMsg(err: unknown): string {
 
 type LifecycleOp = 'create' | 'deploy' | 'delete';
 
+const JOB_NOTICE_TTL_MS = 20000;
+
 export function ProjectsPage() {
   const { projects, activeId, refresh, loading, error } = useProjects();
   const [actionError, setActionError] = useState<string | null>(null);
   const [workloadsDeleteTarget, setWorkloadsDeleteTarget] = useState<Project | null>(null);
 
   const [configs, setConfigs] = useState<Record<string, ConfigResponse>>({});
-  const [jobNotices, setJobNotices] = useState<Record<string, JobResponse>>({});
+  const [jobNotices, setJobNotices] = useState<Record<string, JobResponse & { noticedAt: number }>>({});
   const [jobPendingKey, setJobPendingKey] = useState<string | null>(null);
   const [deployedIds, setDeployedIds] = useState<Set<string> | null>(null);
   const [workloadImages, setWorkloadImages] = useState<Record<string, string>>({});
@@ -141,7 +143,8 @@ export function ProjectsPage() {
       try {
         const job = await api.post<JobResponse>('/api/jobs', { op, projectId: project.id, args });
         // jobNotice.id — per-project notice rendered inline in the row.
-        setJobNotices((prev) => ({ ...prev, [project.id]: job }));
+        // Auto-hides after 20s (see prune effect below).
+        setJobNotices((prev) => ({ ...prev, [project.id]: { ...job, noticedAt: Date.now() } }));
       } catch (err) {
         setActionError(errMsg(err));
       } finally {
@@ -150,6 +153,25 @@ export function ProjectsPage() {
     },
     [],
   );
+
+  // Auto-hide inline job responses 20 seconds after they started.
+  useEffect(() => {
+    const ids = Object.keys(jobNotices);
+    if (ids.length === 0) return;
+    const oldest = Math.min(...ids.map((id) => jobNotices[id]?.noticedAt ?? Date.now()));
+    const delay = Math.max(oldest + JOB_NOTICE_TTL_MS - Date.now(), 0);
+    const timer = window.setTimeout(() => {
+      setJobNotices((prev) => {
+        const cutoff = Date.now() - JOB_NOTICE_TTL_MS;
+        const next: typeof prev = {};
+        for (const [id, entry] of Object.entries(prev)) {
+          if ((entry.noticedAt ?? Date.now()) > cutoff) next[id] = entry;
+        }
+        return next;
+      });
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [jobNotices]);
 
   const isPending = useCallback(
     (projectId: string, op: LifecycleOp) => jobPendingKey === `${projectId}:${op}`,

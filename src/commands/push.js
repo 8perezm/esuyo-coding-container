@@ -1,4 +1,4 @@
-import { dockerExec, run } from "../utils/exec.js";
+import { dockerExec, ensureDockerAvailable, run } from "../utils/exec.js";
 import { imageRef } from "../config.js";
 
 /**
@@ -9,12 +9,19 @@ import { imageRef } from "../config.js";
 export async function pushImage(cfg) {
   const ref = imageRef(cfg);
   console.log(`Pushing ${ref} to ${cfg.image.registry} ...`);
+  try {
+    ensureDockerAvailable();
+  } catch (err) {
+    throw new Error(
+      `${err.message}\n(Push of ${ref} did not start — nothing was pushed.)`
+    );
+  }
   const { cmd, opts } = dockerExec();
   try {
     await run(cmd, ["push", ref], opts);
   } catch (err) {
     throw new Error(
-      `Push failed for ${ref}. Make sure you are logged in to ${cfg.image.registry} (docker login ${cfg.image.registry}).\n${err.message}`
+      `Push failed for ${ref}. Make sure you are logged in to ${cfg.image.registry} (docker login ${cfg.image.registry}). If the output above mentions the Docker API, npipe, or daemon, Docker isn't running — start Docker Desktop (or the Docker daemon) and try again.\n${err.message}`
     );
   }
   console.log(`Pushed ${ref}`);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, RefreshCw, Rocket, Trash2, X } from 'lucide-react';
 import { ApiError, api } from '../lib/api';
+import { useUsageThresholds } from '../lib/usageThresholds';
 import { JobOutput } from '../components/JobOutput';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, PageHeader, Spinner, Table, TableContainer, TBody, TD, TH, THead, TR } from '../components/ui';
 
@@ -13,6 +14,8 @@ interface PodStatus {
   node?: string | null;
   cpu?: string | null;
   memory?: string | null;
+  createdAt?: string | null;
+  startedAt?: string | null;
 }
 
 interface Workload {
@@ -94,17 +97,6 @@ interface SummaryResponse {
   nodesError?: string;
   portsError?: string;
   error?: string;
-}
-
-interface Job {
-  id: string;
-  op: string;
-  status: string;
-  startedAt?: string | null;
-}
-
-interface JobsResponse {
-  jobs?: Job[];
 }
 
 interface JobStarted {
@@ -226,6 +218,29 @@ export function formatBytes(bytes: number | null): string {
   return `${Math.round(bytes)} B`;
 }
 
+// Node table values: kubectl-style raw strings ("250m", "1800Mi") become
+// friendly ("250 mCPU", "1.8 GiB"). Unavailable readings (`<unknown>` on
+// NotReady nodes, or missing metrics) render as a dash, never literally.
+function isUnknownMetric(raw?: string | null): boolean {
+  if (raw === undefined || raw === null) return true;
+  const s = String(raw).trim();
+  return s === '' || s === '—' || s.toLowerCase() === '<unknown>';
+}
+
+export function friendlyNodeCpu(raw?: string | null): string {
+  if (isUnknownMetric(raw)) return '—';
+  return formatCpuMillicores(parseCpuToMillicores(raw));
+}
+
+export function friendlyNodeMemory(raw?: string | null): string {
+  if (isUnknownMetric(raw)) return '—';
+  return formatBytes(parseMemoryToBytes(raw));
+}
+
+export function friendlyPercent(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? ` (${value}%)` : '';
+}
+
 function workloadCpuMillicores(w: Workload): number | null {
   if (!w.deployed || w.pods.length === 0) return null;
   let total = 0;
@@ -254,18 +269,173 @@ function workloadMemoryBytes(w: Workload): number | null {
   return seen ? total : null;
 }
 
+// Warn when usage exceeds 70% of the configured limit.
+export const USAGE_WARN_RATIO = 0.7;
+
+export function workloadLimitCpuMillicores(w: Workload): number | null {
+  return parseCpuToMillicores(w.resources?.limits?.cpu);
+}
+
+export function workloadLimitMemoryBytes(w: Workload): number | null {
+  return parseMemoryToBytes(w.resources?.limits?.memory);
+}
+
+export function usageRatio(used: number | null, limit: number | null): number | null {
+  if (used === null || used === undefined || Number.isNaN(used)) return null;
+  if (limit === null || limit === undefined || Number.isNaN(limit) || limit <= 0) return null;
+  return used / limit;
+}
+
+export function isOverUsage(used: number | null, limit: number | null, threshold = USAGE_WARN_RATIO): boolean {
+  const ratio = usageRatio(used, limit);
+  return ratio !== null && ratio > threshold;
+}
+
+export interface NodeResourceTotals {
+  used: number | null;
+  allocatable: number | null;
+  remaining: number | null;
+}
+
+function sumTotals(
+  nodes: ClusterNode[] | null | undefined,
+  parse: (raw?: string | null) => number | null,
+  usedOf: (n: ClusterNode) => string | null | undefined,
+  capacityOf: (n: ClusterNode) => string | null | undefined,
+): NodeResourceTotals {
+  if (!nodes || nodes.length === 0) return { used: null, allocatable: null, remaining: null };
+  let used = 0;
+  let usedSeen = false;
+  let allocatable = 0;
+  let allocatableSeen = false;
+  for (const n of nodes) {
+    const u = parse(usedOf(n));
+    if (u !== null) {
+      used += u;
+      usedSeen = true;
+    }
+    const a = parse(capacityOf(n));
+    if (a !== null) {
+      allocatable += a;
+      allocatableSeen = true;
+    }
+  }
+  const usedTotal = usedSeen ? used : null;
+  const allocatableTotal = allocatableSeen ? allocatable : null;
+  const remaining =
+    usedTotal !== null && allocatableTotal !== null
+      ? Math.max(0, allocatableTotal - usedTotal)
+      : null;
+  return { used: usedTotal, allocatable: allocatableTotal, remaining };
+}
+
+// Cluster-wide totals across all nodes. Allocatable (what can actually be
+// scheduled) is preferred; capacity is the fallback. Usage comes from the
+// live metrics when metrics-server is present, otherwise it is null.
+export function totalNodeCpu(nodes: ClusterNode[] | null | undefined): NodeResourceTotals {
+  return sumTotals(
+    nodes,
+    parseCpuToMillicores,
+    (n) => n.cpu,
+    (n) => n.cpuAllocatable ?? n.cpuCapacity,
+  );
+}
+
+export function totalNodeMemory(nodes: ClusterNode[] | null | undefined): NodeResourceTotals {
+  return sumTotals(
+    nodes,
+    parseMemoryToBytes,
+    (n) => n.memory,
+    (n) => n.memoryAllocatable ?? n.memoryCapacity,
+  );
+}
+
+function UsageSquare({ over, kind, threshold }: { over: boolean; kind: 'cpu' | 'memory'; threshold: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-ref={`page-overview-${kind}-indicator`}
+      title={over ? `Over ${threshold}% of limit` : `Under ${threshold}% of limit`}
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: 2,
+        flexShrink: 0,
+        backgroundColor: over ? 'var(--color-error, #b3261e)' : 'var(--color-success, #1a7f37)',
+        display: 'inline-block',
+      }}
+    />
+  );
+}
+
 function workloadNodeName(w: Workload): string {
   return w.pods[0]?.node ?? w.nodeName ?? '';
 }
 
-type ProjectSortKey = 'name' | 'status' | 'cpu' | 'memory' | 'node';
+export function formatAge(iso?: string | null, nowMs?: number): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const now = nowMs ?? Date.now();
+  const diffMs = Math.max(0, now - t);
+  const s = Math.floor(diffMs / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 365) return `${d}d`;
+  return `${Math.floor(d / 365)}y`;
+}
+
+function podStartIso(p: PodStatus): string | null {
+  return p.startedAt ?? p.createdAt ?? null;
+}
+
+function workloadMaxAgeMs(w: Workload, nowMs?: number): number | null {
+  if (!w.deployed || w.pods.length === 0) return null;
+  const now = nowMs ?? Date.now();
+  let max: number | null = null;
+  for (const p of w.pods) {
+    const iso = podStartIso(p);
+    if (!iso) continue;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) continue;
+    const age = Math.max(0, now - t);
+    if (max === null || age > max) max = age;
+  }
+  return max;
+}
+
+function workloadAgeText(w: Workload): string {
+  if (!w.deployed || w.pods.length === 0) return '—';
+  const parts = w.pods.map((p) => formatAge(podStartIso(p)));
+  // Collapse identical ages (common single-pod case stays short).
+  if (parts.length > 1 && parts.every((v) => v === parts[0])) return parts[0];
+  return parts.join(', ');
+}
+
+function workloadAgeTitle(w: Workload): string | undefined {
+  if (!w.deployed || w.pods.length === 0) return undefined;
+  return w.pods
+    .map((p) => {
+      const iso = podStartIso(p);
+      const age = formatAge(iso);
+      const restarts = p.restarts ?? 0;
+      return `${p.name}: ${age} (started ${iso ?? 'unknown'}, restarts ${restarts})`;
+    })
+    .join('\n');
+}
+
+type ProjectSortKey = 'name' | 'status' | 'age' | 'cpu' | 'memory' | 'node';
 type StatusFilter = 'all' | 'running' | 'stopped';
 
 const FILTER_STORAGE_KEY = 'overviewProjectsFilter';
 const SORT_KEY_STORAGE_KEY = 'overviewProjectsSortKey';
 const SORT_DIR_STORAGE_KEY = 'overviewProjectsSortDir';
 
-const SORT_KEYS: ProjectSortKey[] = ['name', 'status', 'cpu', 'memory', 'node'];
+const SORT_KEYS: ProjectSortKey[] = ['name', 'status', 'age', 'cpu', 'memory', 'node'];
 
 function readStoredFilter(): StatusFilter {
   try {
@@ -310,6 +480,15 @@ function compareWorkloadsByKey(a: Workload, b: Workload, key: ProjectSortKey, di
     case 'status':
       diff = statusLabel(a).localeCompare(statusLabel(b), undefined, { sensitivity: 'base' });
       break;
+    case 'age': {
+      const av = workloadMaxAgeMs(a);
+      const bv = workloadMaxAgeMs(b);
+      if (av === null && bv === null) diff = 0;
+      else if (av === null) return 1;
+      else if (bv === null) return -1;
+      else diff = av - bv;
+      break;
+    }
     case 'cpu': {
       const av = workloadCpuMillicores(a) ?? -1;
       const bv = workloadCpuMillicores(b) ?? -1;
@@ -402,6 +581,78 @@ function PodSquares({ count }: { count: number }) {
   );
 }
 
+function PortsDetail({ workload }: { workload: Workload }) {
+  const cfg = workload.configuredPorts;
+  if (!cfg) return <span>—</span>;
+  return (
+    <span style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
+      <span style={{ display: 'block' }}>ssh:{dash(cfg.sshNodePort)}</span>
+      {cfg.web.map((p) => (
+        <span key={p.name} style={{ display: 'block' }}>
+          {p.name} {p.port}{p.nodePort ? ` → :${p.nodePort}` : ''}
+        </span>
+      ))}
+      {cfg.sidecars.map((p) => (
+        <span key={p.name} style={{ display: 'block' }}>
+          {p.name} {p.port} → :{p.nodePort}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Status badge with a hover/focus popover listing the workload's ports
+// (the content that used to live in the Ports column).
+function StatusWithPorts({ workload }: { workload: Workload }) {
+  const [open, setOpen] = useState(false);
+  const label = statusLabel(workload);
+  const tone = statusTone(workload);
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block' }}
+      data-ref="page-overview-status-wrap"
+      tabIndex={0}
+      aria-label={`${label} — hover to see ports`}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      <Badge tone={tone}>{label}</Badge>
+      {open && (
+        <span
+          role="tooltip"
+          data-ref="page-overview-status-ports-tip"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            minWidth: 180,
+            maxWidth: 280,
+            padding: '8px 10px',
+            whiteSpace: 'normal',
+            backgroundColor: 'var(--text-primary)',
+            color: 'var(--bg-card)',
+            borderRadius: 6,
+            fontSize: 'var(--font-size-xs)',
+            lineHeight: 1.5,
+            zIndex: 10,
+            pointerEvents: 'none',
+            boxShadow: 'var(--shadow-dropdown)',
+          }}
+        >
+          <span style={{ display: 'block', fontWeight: 700, marginBottom: 4, fontFamily: 'var(--font-body)' }}>
+            Ports for {workload.name}
+          </span>
+          <span style={{ display: 'block', color: 'var(--bg-card)' }}>
+            <PortsDetail workload={workload} />
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function OverviewPage() {
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -412,7 +663,6 @@ export function OverviewPage() {
   const [nodesMetrics, setNodesMetrics] = useState(true);
   const [ports, setPorts] = useState<UsedPort[] | null>(null);
   const [portsError, setPortsError] = useState<string | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ op: string; project: string; id: string; status: string } | null>(null);
@@ -423,15 +673,15 @@ export function OverviewPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(readStoredFilter);
   const [portsHeight, setPortsHeight] = useState(PORTS_DEFAULT_HEIGHT);
   const [portsResizing, setPortsResizing] = useState(false);
+  const { cpu: cpuThreshold, memory: memThreshold } = useUsageThresholds();
 
   const load = useCallback(async (initial = false) => {
     if (initial) setLoaded(false);
     else setRefreshing(true);
     // One shared snapshot (server batches kubectl + caches 5s). Falls back
     // to the three legacy endpoints when the server is old.
-    const [sRes, jRes] = await Promise.allSettled([
+    const [sRes] = await Promise.allSettled([
       api.get<SummaryResponse>('/api/cluster/summary'),
-      api.get<JobsResponse | Job[]>('/api/jobs'),
     ]);
     if (sRes.status === 'fulfilled') {
       const s = sRes.value;
@@ -478,10 +728,6 @@ export function OverviewPage() {
       setNodesError(err);
       setPorts([]);
       setPortsError(err);
-    }
-    if (jRes.status === 'fulfilled') {
-      const data = jRes.value;
-      setJobs(Array.isArray(data) ? data : (data.jobs ?? []));
     }
     setLoaded(true);
     setRefreshing(false);
@@ -630,11 +876,59 @@ export function OverviewPage() {
     window.addEventListener('mouseup', onUp);
   }, [portsHeight]);
 
-  const stats = [
+  const readyNodeList = (nodes ?? []).filter((n) => n.ready);
+  const cpuTotals = totalNodeCpu(readyNodeList);
+  const memTotals = totalNodeMemory(readyNodeList);
+  const cpuTotalRatio = usageRatio(cpuTotals.used, cpuTotals.allocatable);
+  const memTotalRatio = usageRatio(memTotals.used, memTotals.allocatable);
+  const cpuTotalOver = cpuTotalRatio !== null && cpuTotalRatio * 100 > cpuThreshold;
+  const memTotalOver = memTotalRatio !== null && memTotalRatio * 100 > memThreshold;
+
+  interface StatIndicator {
+    over: boolean;
+    kind: 'cpu' | 'memory';
+    threshold: number;
+  }
+
+  const stats: Array<{
+    label: string;
+    to?: string;
+    hint: string;
+    value: string;
+    percent?: string | null;
+    title?: string;
+    indicator?: StatIndicator | null;
+  }> = [
+    {
+      label: 'Memory',
+      value: !loaded ? '…' : memTotals.used !== null ? formatBytes(memTotals.used) : '—',
+      percent: !loaded || memTotalRatio === null ? null : `${Math.round(memTotalRatio * 100)}%`,
+      hint: !loaded
+        ? 'total across ready nodes'
+        : memTotals.used !== null && memTotals.allocatable !== null
+          ? `${formatBytes(memTotals.remaining)} free of ${formatBytes(memTotals.allocatable)}`
+          : memTotals.allocatable !== null
+            ? `${formatBytes(memTotals.allocatable)} allocatable · usage n/a`
+            : 'no ready nodes',
+      title: memTotalRatio !== null ? `${Math.round(memTotalRatio * 100)}% of allocatable (alert at ${memThreshold}%)` : undefined,
+      indicator: memTotalRatio !== null ? { over: memTotalOver, kind: 'memory', threshold: memThreshold } : null,
+    },
+    {
+      label: 'CPU',
+      value: !loaded ? '…' : cpuTotals.used !== null ? formatCpuMillicores(cpuTotals.used) : '—',
+      percent: !loaded || cpuTotalRatio === null ? null : `${Math.round(cpuTotalRatio * 100)}%`,
+      hint: !loaded
+        ? 'total across ready nodes'
+        : cpuTotals.used !== null && cpuTotals.allocatable !== null
+          ? `${formatCpuMillicores(cpuTotals.remaining)} free of ${formatCpuMillicores(cpuTotals.allocatable)}`
+          : cpuTotals.allocatable !== null
+            ? `${formatCpuMillicores(cpuTotals.allocatable)} allocatable · usage n/a`
+            : 'no ready nodes',
+      title: cpuTotalRatio !== null ? `${Math.round(cpuTotalRatio * 100)}% of allocatable (alert at ${cpuThreshold}%)` : undefined,
+      indicator: cpuTotalRatio !== null ? { over: cpuTotalOver, kind: 'cpu', threshold: cpuThreshold } : null,
+    },
     { label: 'Projects running', to: '/projects', hint: `${runningCount} / ${workloads?.length ?? '—'} deployed`, value: !loaded ? '…' : `${runningCount}/${workloads?.length ?? 0}` },
     { label: 'Nodes ready', to: '/', hint: 'kubelet Ready', value: !loaded ? '…' : `${readyNodes}/${nodes?.length ?? 0}` },
-    { label: 'Ports in use', to: '/', hint: 'NodePorts allocated', value: !loaded ? '…' : String(ports?.length ?? 0) },
-    { label: 'Jobs', to: '/jobs', hint: 'recent background ops', value: !loaded ? '…' : String(jobs.length) },
   ];
 
   return (
@@ -653,8 +947,27 @@ export function OverviewPage() {
         {stats.map((s) => (
           <Card key={s.label} data-ref="page-overview-stat-card">
             <p style={{ margin: 0, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>{s.label}</p>
-            <p style={{ margin: '4px 0', fontFamily: 'var(--font-heading)', fontSize: 'var(--font-size-5xl)', fontWeight: 700 }}>
-              <Link to={s.to}>{s.value}</Link>
+            <p style={{ margin: '4px 0', fontFamily: 'var(--font-heading)', fontSize: 'var(--font-size-5xl)', fontWeight: 700 }} title={s.title}>
+              {s.indicator ? (
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, color: s.indicator.over ? 'var(--color-error, #b3261e)' : undefined }}>
+                  <UsageSquare over={s.indicator.over} kind={s.indicator.kind} threshold={s.indicator.threshold} />
+                  {s.to ? <Link to={s.to}>{s.value}</Link> : s.value}
+                  {s.percent ? (
+                    <span
+                      data-ref={`page-overview-${s.indicator.kind}-percent`}
+                      style={{
+                        fontSize: 'var(--font-size-xl)',
+                        fontWeight: 600,
+                        color: s.indicator.over ? 'var(--color-error, #b3261e)' : 'var(--text-muted)',
+                      }}
+                    >
+                      {s.percent}
+                    </span>
+                  ) : null}
+                </span>
+              ) : (
+                s.to ? <Link to={s.to}>{s.value}</Link> : s.value
+              )}
             </p>
             <p style={{ margin: 0, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{s.hint}</p>
           </Card>
@@ -751,7 +1064,7 @@ export function OverviewPage() {
               <TR>
                 <TH aria-sort={sortAria('name')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('name')} title="Sort by project" data-ref="page-overview-sort-name">Project{sortIndicator('name')}</TH>
                 <TH aria-sort={sortAria('status')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('status')} title="Sort by status" data-ref="page-overview-sort-status">Status{sortIndicator('status')}</TH>
-                <TH>Ports</TH>
+                <TH aria-sort={sortAria('age')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('age')} title="Sort by age (last restart)" data-ref="page-overview-sort-age">Age{sortIndicator('age')}</TH>
                 <TH aria-sort={sortAria('cpu')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('cpu')} title="Sort by CPU" data-ref="page-overview-sort-cpu">CPU{sortIndicator('cpu')}</TH>
                 <TH aria-sort={sortAria('memory')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('memory')} title="Sort by memory" data-ref="page-overview-sort-memory">Memory{sortIndicator('memory')}</TH>
                 <TH aria-sort={sortAria('node')} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('node')} title="Sort by node" data-ref="page-overview-sort-node">Node{sortIndicator('node')}</TH>
@@ -762,13 +1075,24 @@ export function OverviewPage() {
               {sortedWorkloads.map((w) => {
                 const key = w.projectId ?? w.name;
                 const isPending = pending === `deploy:${w.projectId}` || pending === `delete:${w.projectId}`;
+                const stopped = !w.deployed;
                 const cpuTotal = workloadCpuMillicores(w);
                 const memTotal = workloadMemoryBytes(w);
                 const cpuRaw = !w.deployed ? null : w.pods.length === 0 ? null : w.pods.map((p) => p.cpu ?? '—').join(', ');
                 const memRaw = !w.deployed ? null : w.pods.length === 0 ? null : w.pods.map((p) => p.memory ?? '—').join(', ');
-                const cpuHuman = !w.deployed ? '—' : w.pods.length === 0 ? '—' : formatCpuMillicores(cpuTotal);
-                const memHuman = !w.deployed ? '—' : w.pods.length === 0 ? '—' : formatBytes(memTotal);
-                const podNode = w.pods[0]?.node ?? w.nodeName ?? '—';
+                const cpuHuman = stopped ? '' : w.pods.length === 0 ? '—' : formatCpuMillicores(cpuTotal);
+                const memHuman = stopped ? '' : w.pods.length === 0 ? '—' : formatBytes(memTotal);
+                const cpuLimit = workloadLimitCpuMillicores(w);
+                const memLimit = workloadLimitMemoryBytes(w);
+                const cpuRatio = usageRatio(cpuTotal, cpuLimit);
+                const memRatio = usageRatio(memTotal, memLimit);
+                const cpuOver = cpuRatio !== null && cpuRatio * 100 > cpuThreshold;
+                const memOver = memRatio !== null && memRatio * 100 > memThreshold;
+                const cpuTitleParts = [cpuRaw ?? undefined];
+                if (cpuRatio !== null) cpuTitleParts.push(`${Math.round(cpuRatio * 100)}% of limit (alert at ${cpuThreshold}%)`);
+                const memTitleParts = [memRaw ?? undefined];
+                if (memRatio !== null) memTitleParts.push(`${Math.round(memRatio * 100)}% of limit (alert at ${memThreshold}%)`);
+                const podNode = w.pods[0]?.node ?? w.nodeName ?? (stopped ? '' : '—');
                 return (
                   <TR key={key}>
                     <TD>
@@ -782,31 +1106,27 @@ export function OverviewPage() {
                       </div>
                       {w.error && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-error, #b3261e)' }}>{w.error}</div>}
                     </TD>
-                    <TD><Badge tone={statusTone(w)}>{statusLabel(w)}</Badge></TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {w.configuredPorts ? (
-                        <span>
-                          ssh:{dash(w.configuredPorts.sshNodePort)}
-                          {w.configuredPorts.web.map((p) => (
-                            <span key={p.name} style={{ display: 'block' }}>
-                              {p.name} {p.port}{p.nodePort ? ` → :${p.nodePort}` : ''}
-                            </span>
-                          ))}
-                          {w.configuredPorts.sidecars.map((p) => (
-                            <span key={p.name} style={{ display: 'block' }}>
-                              {p.name} {p.port} → :{p.nodePort}
-                            </span>
-                          ))}
-                        </span>
-                      ) : '—'}
+                    <TD><StatusWithPorts workload={w} /></TD>
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={workloadAgeTitle(w)} data-ref="page-overview-age">
+                      {stopped ? '' : workloadAgeText(w)}
                     </TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={cpuRaw ?? undefined}>
-                      {cpuHuman}
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={cpuTitleParts.filter(Boolean).join(' · ') || undefined} data-ref="page-overview-cpu">
+                      {(cpuRatio !== null || cpuHuman) && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: cpuOver ? 'var(--color-error, #b3261e)' : undefined }}>
+                        {cpuRatio !== null && <UsageSquare over={cpuOver} kind="cpu" threshold={cpuThreshold} />}
+                        <span>{cpuHuman}</span>
+                      </span>
+                      )}
                       {w.deployed && !w.metricsAvailable && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>metrics n/a</span>}
                       {w.resources?.limits?.cpu && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>limit {w.resources.limits.cpu}</span>}
                     </TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={memRaw ?? undefined}>
-                      {memHuman}
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} title={memTitleParts.filter(Boolean).join(' · ') || undefined} data-ref="page-overview-memory">
+                      {(memRatio !== null || memHuman) && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: memOver ? 'var(--color-error, #b3261e)' : undefined }}>
+                        {memRatio !== null && <UsageSquare over={memOver} kind="memory" threshold={memThreshold} />}
+                        <span>{memHuman}</span>
+                      </span>
+                      )}
                       {w.resources?.limits?.memory && <span style={{ display: 'block', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)' }}>limit {w.resources.limits.memory}</span>}
                     </TD>
                     <TD style={{ fontSize: 'var(--font-size-xs)' }}>{podNode}</TD>
@@ -877,10 +1197,10 @@ export function OverviewPage() {
                     <TD style={{ fontWeight: 600 }}>{n.name}</TD>
                     <TD><Badge tone={n.ready ? 'accent' : 'violet'}>{n.ready ? 'Ready' : 'NotReady'}</Badge></TD>
                     <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {n.cpu ?? '—'}{n.cpuPercent != null ? ` (${n.cpuPercent}%)` : ''} / {dash(n.cpuAllocatable)}
+                      {friendlyNodeCpu(n.cpu)}{friendlyPercent(n.cpuPercent)} / {friendlyNodeCpu(n.cpuAllocatable)}
                     </TD>
                     <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {n.memory ?? '—'}{n.memoryPercent != null ? ` (${n.memoryPercent}%)` : ''} / {dash(n.memoryAllocatable)}
+                      {friendlyNodeMemory(n.memory)}{friendlyPercent(n.memoryPercent)} / {friendlyNodeMemory(n.memoryAllocatable)}
                     </TD>
                     <TD>{n.pods ?? '—'}</TD>
                     <TD style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>

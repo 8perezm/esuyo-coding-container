@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { dockerExec, run } from "../utils/exec.js";
+import { dockerExec, ensureDockerAvailable, run } from "../utils/exec.js";
 import { imageRef } from "../config.js";
 
 /**
@@ -27,8 +27,21 @@ export async function buildImage(cfg) {
   }
   args.push(cfg.image.contextPath);
   console.log(`Building image ${ref} ...`);
+  try {
+    ensureDockerAvailable();
+  } catch (err) {
+    throw new Error(
+      `${err.message}\n(Build of ${ref} did not start — no image was built.)`
+    );
+  }
   const { cmd, opts } = dockerExec();
-  await run(cmd, args, opts);
+  try {
+    await run(cmd, args, opts);
+  } catch (err) {
+    throw new Error(
+      `${err.message}\n(Build of ${ref} failed. If the output above mentions the Docker API, npipe, or daemon, Docker isn't running — start Docker Desktop (or the Docker daemon) and try again.)`
+    );
+  }
   console.log(`Built ${ref}`);
 }
 
