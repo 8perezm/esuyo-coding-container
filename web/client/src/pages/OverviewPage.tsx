@@ -88,6 +88,15 @@ interface PortsResponse {
   error?: string;
 }
 
+interface SshAliasEntry {
+  alias: string;
+  port?: number | string | null;
+}
+
+interface SshListResponse {
+  entries?: SshAliasEntry[];
+}
+
 interface SummaryResponse {
   ok: boolean;
   workloads?: Workload[];
@@ -239,6 +248,32 @@ export function friendlyNodeMemory(raw?: string | null): string {
 
 export function friendlyPercent(value?: number | null): string {
   return typeof value === 'number' && Number.isFinite(value) ? ` (${value}%)` : '';
+}
+
+// Nodes table cells. NotReady nodes show capacity only (the "— / " usage
+// prefix is omitted, but the allocatable value is kept).
+// Ready nodes with unknown usage show capacity only; with unknown capacity
+// show usage only; otherwise "used (pct) / allocatable".
+export function nodeCpuDisplay(n: ClusterNode): string {
+  if (!n.ready) return friendlyNodeCpu(n.cpuAllocatable ?? n.cpuCapacity);
+  const capRaw = n.cpuAllocatable ?? n.cpuCapacity;
+  const usedUnknown = isUnknownMetric(n.cpu);
+  const capUnknown = isUnknownMetric(capRaw);
+  if (usedUnknown && capUnknown) return '—';
+  if (usedUnknown) return friendlyNodeCpu(capRaw);
+  if (capUnknown) return `${friendlyNodeCpu(n.cpu)}${friendlyPercent(n.cpuPercent)}`;
+  return `${friendlyNodeCpu(n.cpu)}${friendlyPercent(n.cpuPercent)} / ${friendlyNodeCpu(capRaw)}`;
+}
+
+export function nodeMemoryDisplay(n: ClusterNode): string {
+  if (!n.ready) return friendlyNodeMemory(n.memoryAllocatable ?? n.memoryCapacity);
+  const capRaw = n.memoryAllocatable ?? n.memoryCapacity;
+  const usedUnknown = isUnknownMetric(n.memory);
+  const capUnknown = isUnknownMetric(capRaw);
+  if (usedUnknown && capUnknown) return '—';
+  if (usedUnknown) return friendlyNodeMemory(capRaw);
+  if (capUnknown) return `${friendlyNodeMemory(n.memory)}${friendlyPercent(n.memoryPercent)}`;
+  return `${friendlyNodeMemory(n.memory)}${friendlyPercent(n.memoryPercent)} / ${friendlyNodeMemory(capRaw)}`;
 }
 
 function workloadCpuMillicores(w: Workload): number | null {
@@ -509,6 +544,82 @@ function compareWorkloadsByKey(a: Workload, b: Workload, key: ProjectSortKey, di
   return diff * dir;
 }
 
+type PortsSortKey = 'nodePort' | 'service' | 'portName' | 'servicePort' | 'sshAlias';
+
+const PORTS_SORT_KEY_STORAGE_KEY = 'overviewPortsSortKey';
+const PORTS_SORT_DIR_STORAGE_KEY = 'overviewPortsSortDir';
+
+const PORTS_SORT_KEYS: PortsSortKey[] = ['nodePort', 'service', 'portName', 'servicePort', 'sshAlias'];
+
+function readStoredPortsSortKey(): PortsSortKey | null {
+  try {
+    const v = window.localStorage.getItem(PORTS_SORT_KEY_STORAGE_KEY);
+    return (PORTS_SORT_KEYS as string[]).includes(v ?? '') ? (v as PortsSortKey) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredPortsSortDir(): 1 | -1 {
+  try {
+    return window.localStorage.getItem(PORTS_SORT_DIR_STORAGE_KEY) === '-1' ? -1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function formatPortsServicePort(p: UsedPort): string {
+  const portText = p.port === undefined || p.port === null ? '' : String(p.port);
+  const targetText = p.targetPort === undefined || p.targetPort === null ? '' : String(p.targetPort);
+  if (portText && targetText) return `${portText} → ${targetText}`;
+  return portText || targetText;
+}
+
+function comparePortsByKey(
+  a: UsedPort,
+  b: UsedPort,
+  key: PortsSortKey,
+  dir: 1 | -1,
+  aliasByPort: Record<number, string>,
+): number {
+  let diff = 0;
+  switch (key) {
+    case 'nodePort':
+      diff = a.nodePort - b.nodePort;
+      break;
+    case 'service':
+      diff = `${a.namespace}/${a.service}`.localeCompare(`${b.namespace}/${b.service}`, undefined, { sensitivity: 'base' });
+      break;
+    case 'portName': {
+      const an = a.name ?? '';
+      const bn = b.name ?? '';
+      if (!an && bn) return 1;
+      if (an && !bn) return -1;
+      diff = an.localeCompare(bn, undefined, { sensitivity: 'base' });
+      break;
+    }
+    case 'servicePort': {
+      const ap = typeof a.port === 'number' ? a.port : -1;
+      const bp = typeof b.port === 'number' ? b.port : -1;
+      diff = ap - bp;
+      if (diff === 0) {
+        diff = String(a.targetPort ?? '').localeCompare(String(b.targetPort ?? ''), undefined, { sensitivity: 'base' });
+      }
+      break;
+    }
+    case 'sshAlias': {
+      const aa = aliasByPort[a.nodePort] ?? '';
+      const ba = aliasByPort[b.nodePort] ?? '';
+      if (!aa && ba) return 1;
+      if (aa && !ba) return -1;
+      diff = aa.localeCompare(ba, undefined, { sensitivity: 'base' });
+      break;
+    }
+  }
+  if (diff === 0 && key !== 'nodePort') diff = a.nodePort - b.nodePort;
+  return diff * dir;
+}
+
 // Five table rows (plus the sticky header) set the default ports-table
 // height; users can drag the handle to grow/shrink it.
 const PORTS_ROW_PX = 45;
@@ -663,6 +774,7 @@ export function OverviewPage() {
   const [nodesMetrics, setNodesMetrics] = useState(true);
   const [ports, setPorts] = useState<UsedPort[] | null>(null);
   const [portsError, setPortsError] = useState<string | null>(null);
+  const [sshAliasByPort, setSshAliasByPort] = useState<Record<number, string>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ op: string; project: string; id: string; status: string } | null>(null);
@@ -671,6 +783,8 @@ export function OverviewPage() {
   const [sortKey, setSortKey] = useState<ProjectSortKey | null>(readStoredSortKey);
   const [sortDir, setSortDir] = useState<1 | -1>(readStoredSortDir);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(readStoredFilter);
+  const [portsSortKey, setPortsSortKey] = useState<PortsSortKey | null>(readStoredPortsSortKey);
+  const [portsSortDir, setPortsSortDir] = useState<1 | -1>(readStoredPortsSortDir);
   const [portsHeight, setPortsHeight] = useState(PORTS_DEFAULT_HEIGHT);
   const [portsResizing, setPortsResizing] = useState(false);
   const { cpu: cpuThreshold, memory: memThreshold } = useUsageThresholds();
@@ -678,11 +792,28 @@ export function OverviewPage() {
   const load = useCallback(async (initial = false) => {
     if (initial) setLoaded(false);
     else setRefreshing(true);
+    const buildSshAliasMap = (entries?: SshAliasEntry[] | null): Record<number, string> => {
+      const map: Record<number, string> = {};
+      for (const e of entries ?? []) {
+        const port = typeof e.port === 'string' ? Number.parseInt(e.port, 10) : Number(e.port);
+        if (!Number.isInteger(port) || !e.alias || map[port] !== undefined) continue;
+        map[port] = e.alias;
+      }
+      return map;
+    };
     // One shared snapshot (server batches kubectl + caches 5s). Falls back
     // to the three legacy endpoints when the server is old.
-    const [sRes] = await Promise.allSettled([
+    // SSH aliases are best-effort: a missing/failed list just leaves the
+    // column blank, it never fails the dashboard load.
+    const [sRes, sshRes] = await Promise.allSettled([
       api.get<SummaryResponse>('/api/cluster/summary'),
+      api.get<SshListResponse>('/api/ssh-list'),
     ]);
+    if (sshRes.status === 'fulfilled') {
+      setSshAliasByPort(buildSshAliasMap(sshRes.value.entries));
+    } else if (sshRes.reason instanceof ApiError && sshRes.reason.status === 404) {
+      setSshAliasByPort({});
+    }
     if (sRes.status === 'fulfilled') {
       const s = sRes.value;
       setWorkloads(s.workloads ?? []);
@@ -826,6 +957,9 @@ export function OverviewPage() {
   const sortedWorkloads = [...filteredWorkloads].sort((a, b) =>
     sortKey ? compareWorkloadsByKey(a, b, sortKey, sortDir) : compareWorkloads(a, b),
   );
+  const sortedNodes = [...(nodes ?? [])].sort(
+    (a, b) => Number(b.ready) - Number(a.ready) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  );
 
   const toggleSort = useCallback((key: ProjectSortKey) => {
     if (sortKey !== key) {
@@ -857,6 +991,37 @@ export function OverviewPage() {
     if (sortKey !== key) return 'none';
     return sortDir === 1 ? 'ascending' : 'descending';
   };
+
+  const togglePortsSort = useCallback((key: PortsSortKey) => {
+    if (portsSortKey !== key) {
+      setPortsSortKey(key);
+      setPortsSortDir(1);
+    } else {
+      setPortsSortDir((d) => (d === 1 ? -1 : 1));
+    }
+  }, [portsSortKey]);
+
+  useEffect(() => {
+    persistStored(PORTS_SORT_KEY_STORAGE_KEY, portsSortKey ?? '');
+  }, [portsSortKey]);
+
+  useEffect(() => {
+    persistStored(PORTS_SORT_DIR_STORAGE_KEY, String(portsSortDir));
+  }, [portsSortDir]);
+
+  const portsSortIndicator = (key: PortsSortKey): string => {
+    if (portsSortKey !== key) return '';
+    return portsSortDir === 1 ? ' ▲' : ' ▼';
+  };
+
+  const portsSortAria = (key: PortsSortKey): 'ascending' | 'descending' | 'none' => {
+    if (portsSortKey !== key) return 'none';
+    return portsSortDir === 1 ? 'ascending' : 'descending';
+  };
+
+  const sortedPorts = [...(ports ?? [])].sort((a, b) =>
+    portsSortKey ? comparePortsByKey(a, b, portsSortKey, portsSortDir, sshAliasByPort) : a.nodePort - b.nodePort,
+  );
 
   const startPortsResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -949,22 +1114,34 @@ export function OverviewPage() {
             <p style={{ margin: 0, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>{s.label}</p>
             <p style={{ margin: '4px 0', fontFamily: 'var(--font-heading)', fontSize: 'var(--font-size-5xl)', fontWeight: 700 }} title={s.title}>
               {s.indicator ? (
-                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, color: s.indicator.over ? 'var(--color-error, #b3261e)' : undefined }}>
-                  <UsageSquare over={s.indicator.over} kind={s.indicator.kind} threshold={s.indicator.threshold} />
-                  {s.to ? <Link to={s.to}>{s.value}</Link> : s.value}
-                  {s.percent ? (
+                s.percent ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                    <UsageSquare over={s.indicator.over} kind={s.indicator.kind} threshold={s.indicator.threshold} />
                     <span
                       data-ref={`page-overview-${s.indicator.kind}-percent`}
                       style={{
-                        fontSize: 'var(--font-size-xl)',
-                        fontWeight: 600,
-                        color: s.indicator.over ? 'var(--color-error, #b3261e)' : 'var(--text-muted)',
+                        color: s.indicator.over ? 'var(--color-error, #b3261e)' : undefined,
                       }}
                     >
                       {s.percent}
                     </span>
-                  ) : null}
-                </span>
+                    <span
+                      data-ref={`page-overview-${s.indicator.kind}-absolute`}
+                      style={{
+                        fontSize: 'var(--font-size-xl)',
+                        fontWeight: 600,
+                        color: 'var(--text-muted)',
+                      }}
+                    >
+                      {s.to ? <Link to={s.to}>{s.value}</Link> : s.value}
+                    </span>
+                  </span>
+                ) : (
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, color: s.indicator.over ? 'var(--color-error, #b3261e)' : undefined }}>
+                    <UsageSquare over={s.indicator.over} kind={s.indicator.kind} threshold={s.indicator.threshold} />
+                    {s.to ? <Link to={s.to}>{s.value}</Link> : s.value}
+                  </span>
+                )
               ) : (
                 s.to ? <Link to={s.to}>{s.value}</Link> : s.value
               )}
@@ -1192,23 +1369,35 @@ export function OverviewPage() {
                 </TR>
               </THead>
               <TBody>
-                {nodes.map((n) => (
+                {sortedNodes.map((n) => {
+                  const cpuOver = typeof n.cpuPercent === 'number' && Number.isFinite(n.cpuPercent) && n.cpuPercent > cpuThreshold;
+                  const memOver = typeof n.memoryPercent === 'number' && Number.isFinite(n.memoryPercent) && n.memoryPercent > memThreshold;
+                  const hasCpuPercent = typeof n.cpuPercent === 'number' && Number.isFinite(n.cpuPercent);
+                  const hasMemPercent = typeof n.memoryPercent === 'number' && Number.isFinite(n.memoryPercent);
+                  return (
                   <TR key={n.name}>
                     <TD style={{ fontWeight: 600 }}>{n.name}</TD>
                     <TD><Badge tone={n.ready ? 'accent' : 'violet'}>{n.ready ? 'Ready' : 'NotReady'}</Badge></TD>
                     <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {friendlyNodeCpu(n.cpu)}{friendlyPercent(n.cpuPercent)} / {friendlyNodeCpu(n.cpuAllocatable)}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: cpuOver ? 'var(--color-error, #b3261e)' : undefined }}>
+                        {hasCpuPercent && <UsageSquare over={cpuOver} kind="cpu" threshold={cpuThreshold} />}
+                        <span>{nodeCpuDisplay(n)}</span>
+                      </span>
                     </TD>
                     <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }}>
-                      {friendlyNodeMemory(n.memory)}{friendlyPercent(n.memoryPercent)} / {friendlyNodeMemory(n.memoryAllocatable)}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: memOver ? 'var(--color-error, #b3261e)' : undefined }}>
+                        {hasMemPercent && <UsageSquare over={memOver} kind="memory" threshold={memThreshold} />}
+                        <span>{nodeMemoryDisplay(n)}</span>
+                      </span>
                     </TD>
-                    <TD>{n.pods ?? '—'}</TD>
+                    <TD>{n.ready ? (n.pods ?? '—') : ''}</TD>
                     <TD style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
                       {dash(n.kubelet)} · {dash(n.arch)}
                       <span style={{ display: 'block' }}>{dash(n.osImage)}</span>
                     </TD>
                   </TR>
-                ))}
+                  );
+                })}
               </TBody>
             </Table>
           </TableContainer>
@@ -1232,19 +1421,21 @@ export function OverviewPage() {
             <Table aria-label="Ports in use" data-ref="page-overview-ports-table">
               <THead>
                 <TR>
-                  <TH style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1 }}>NodePort</TH>
-                  <TH style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1 }}>Service</TH>
-                  <TH style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1 }}>Port name</TH>
-                  <TH style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1 }}>Service port</TH>
+                  <TH aria-sort={portsSortAria('nodePort')} style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1, cursor: 'pointer', userSelect: 'none' }} onClick={() => togglePortsSort('nodePort')} title="Sort by NodePort" data-ref="page-overview-ports-sort-nodeport">NodePort{portsSortIndicator('nodePort')}</TH>
+                  <TH aria-sort={portsSortAria('service')} style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1, cursor: 'pointer', userSelect: 'none' }} onClick={() => togglePortsSort('service')} title="Sort by service" data-ref="page-overview-ports-sort-service">Service{portsSortIndicator('service')}</TH>
+                  <TH aria-sort={portsSortAria('portName')} style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1, cursor: 'pointer', userSelect: 'none' }} onClick={() => togglePortsSort('portName')} title="Sort by port name" data-ref="page-overview-ports-sort-portname">Port name{portsSortIndicator('portName')}</TH>
+                  <TH aria-sort={portsSortAria('servicePort')} style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1, cursor: 'pointer', userSelect: 'none' }} onClick={() => togglePortsSort('servicePort')} title="Sort by service port" data-ref="page-overview-ports-sort-serviceport">Service port{portsSortIndicator('servicePort')}</TH>
+                  <TH aria-sort={portsSortAria('sshAlias')} style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-table-header)', zIndex: 1, cursor: 'pointer', userSelect: 'none' }} onClick={() => togglePortsSort('sshAlias')} title="Sort by SSH alias" data-ref="page-overview-ports-sort-sshalias">SSH alias{portsSortIndicator('sshAlias')}</TH>
                 </TR>
               </THead>
               <TBody>
-                {ports.map((p) => (
+                {sortedPorts.map((p) => (
                   <TR key={`${p.namespace}/${p.service}/${p.nodePort}`}>
                     <TD style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.nodePort}</TD>
                     <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-sm)' }}>{p.namespace}/{p.service}</TD>
-                    <TD>{dash(p.name)}</TD>
-                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-sm)' }}>{dash(p.port)} → {dash(p.targetPort)}</TD>
+                    <TD>{p.name ?? ''}</TD>
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-sm)' }}>{formatPortsServicePort(p)}</TD>
+                    <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-sm)' }} data-ref="page-overview-ports-ssh-alias">{sshAliasByPort[p.nodePort] ?? ''}</TD>
                   </TR>
                 ))}
               </TBody>
