@@ -123,6 +123,7 @@ mac:
 
 linux:
   icon: build/icons/
+  packageName: esuyo-coding-container
   target:
     - AppImage
     - deb
