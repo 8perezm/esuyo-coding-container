@@ -68,7 +68,19 @@ function monoCell(value: string | number | null | undefined): ReactNode {
 }
 
 export function SshKeysPage() {
-  const { activeId: activeProjectId } = useProjects();
+  const { projects } = useProjects();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Default to the first project once loaded; follow deletions.
+  useEffect(() => {
+    if (projects.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+    if (selectedId === null || !projects.some((p) => p.id === selectedId)) {
+      setSelectedId(projects[0].id);
+    }
+  }, [projects, selectedId]);
 
   const [entries, setEntries] = useState<SshEntry[] | null>(null);
   const [aliasesLoading, setAliasesLoading] = useState(false);
@@ -110,7 +122,7 @@ export function SshKeysPage() {
     let cancelled = false;
     setRotateJob(null);
     setRotateError(null);
-    if (!activeProjectId) {
+    if (!selectedId) {
       setKey(null);
       setKeyError(null);
       setKeyLoading(false);
@@ -119,7 +131,7 @@ export function SshKeysPage() {
     setKeyLoading(true);
     setKeyError(null);
     api
-      .get<KeyInfo>(`/api/key?projectId=${encodeURIComponent(activeProjectId)}`)
+      .get<KeyInfo>(`/api/key?projectId=${encodeURIComponent(selectedId)}`)
       .then((data) => {
         if (!cancelled) setKey(data);
       })
@@ -135,7 +147,7 @@ export function SshKeysPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId]);
+  }, [selectedId]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -155,14 +167,14 @@ export function SshKeysPage() {
   }
 
   async function handleRotate() {
-    if (!activeProjectId) return;
+    if (!selectedId) return;
     setRotating(true);
     setRotateError(null);
     setRotateJob(null);
     try {
       const job = await api.post<JobInfo>('/api/jobs', {
         op: 'key-rotate',
-        projectId: activeProjectId,
+        projectId: selectedId,
         args: { force: true },
       });
       setRotateJob(job);
@@ -265,9 +277,9 @@ export function SshKeysPage() {
         <Card data-ref="page-ssh-keys-project-card">
           <h2 data-ref="page-ssh-keys-heading-project" style={{ fontSize: 'var(--font-size-2xl)', marginBottom: 16 }}>Project key</h2>
           <div style={{ marginBottom: 16 }}>
-            <ProjectPicker />
+            <ProjectPicker value={selectedId} onChange={setSelectedId} />
           </div>
-          {!activeProjectId ? (
+          {!selectedId ? (
             <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}>
               Select a project to view its SSH key.
             </p>

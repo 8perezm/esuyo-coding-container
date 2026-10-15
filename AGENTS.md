@@ -5,6 +5,15 @@
   no "CLI args" / "CLI-parity" notes, no command-line renderings of job
   arguments. Describe actions and results in GUI terms (pages, buttons, jobs).
 
+## Testing
+
+- When a change involves any code (backend `src/` / `web/server/` or GUI
+  `web/client/`), update the unit tests and any other affected tests to
+  cover it. This includes new functionality: add tests for new behavior,
+  not just updated assertions for changed behavior.
+- Verify with execution before finishing: run the affected test files, and
+  the full suite when the change is load-bearing.
+
 ## Running commands (Windows)
 
 - Foreground commands can hang with zero output: state the expected

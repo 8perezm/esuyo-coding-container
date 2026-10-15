@@ -41,7 +41,7 @@ function errMsg(err: unknown): string {
 export function ProjectEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { projects, activeId, setActiveId, refresh, loading: projectsLoading } = useProjects();
+  const { projects, refresh, loading: projectsLoading } = useProjects();
 
   const [project, setProject] = useState<Project | null>(null);
   const [name, setName] = useState('');
@@ -242,7 +242,6 @@ export function ProjectEditPage() {
     setRemoving(true);
     try {
       await api.del<{ ok: boolean }>(`/api/projects/${encodeURIComponent(project.id)}`);
-      if (activeId === project.id) setActiveId(null);
       await refresh();
       navigate('/projects');
     } catch (err) {

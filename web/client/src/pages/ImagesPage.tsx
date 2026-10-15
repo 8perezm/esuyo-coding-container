@@ -470,14 +470,15 @@ function JobProgress({
 }
 
 export function ImagesPage() {
-  const { projects, activeId } = useProjects();
-  const active = projects.find((p) => p.id === activeId) ?? null;
+  const { projects } = useProjects();
   const [refreshTick, setRefreshTick] = useState(0);
   // System images are global: no project is needed. The picker below is an
   // optional override (e.g. to target another namespace/registry); off by
   // default so the page works exactly like `coding-container system ...`.
   const [useProjectOverride, setUseProjectOverride] = useState(false);
-  const effectiveProjectId = useProjectOverride ? (active?.id ?? null) : null;
+  const [overrideProjectId, setOverrideProjectId] = useState<string | null>(null);
+  const overrideProject = projects.find((p) => p.id === overrideProjectId) ?? projects[0] ?? null;
+  const effectiveProjectId = useProjectOverride ? (overrideProject?.id ?? null) : null;
   const sys = useSystemState(effectiveProjectId, refreshTick);
   const globalDockerfile = useGlobalDockerfile();
 
@@ -490,7 +491,7 @@ export function ImagesPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function submitJob(op: string, args: Record<string, unknown>, pendingLabel?: string) {
-    if (useProjectOverride && !active) {
+    if (useProjectOverride && !overrideProject) {
       setError('Select a project first, or turn off the project override to use the repo default.');
       return;
     }
@@ -518,7 +519,7 @@ export function ImagesPage() {
   }
 
   function handleGc(preview: boolean) {
-    if (useProjectOverride && !active) {
+    if (useProjectOverride && !overrideProject) {
       setError('Select a project first, or turn off the project override to use the repo default.');
       return;
     }
@@ -562,8 +563,8 @@ export function ImagesPage() {
           />
           Use selected project config (optional override)
         </label>
-        {useProjectOverride ? <ProjectPicker /> : null}
-        {useProjectOverride && projects.length > 0 && !active && (
+        {useProjectOverride ? <ProjectPicker value={overrideProject?.id ?? null} onChange={setOverrideProjectId} /> : null}
+        {useProjectOverride && projects.length > 0 && !overrideProject && (
           <p data-ref="page-images-alert-no-project" role="alert" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-md)' }}>
             Select a project to manage system images, or turn off the override to use the repo default.
           </p>
@@ -636,7 +637,7 @@ export function ImagesPage() {
                   />
                 </div>
                 <div style={{ marginTop: 12 }}>
-                  <Button data-ref="page-images-submit-publish" type="submit" disabled={pending !== null || (useProjectOverride && !active)}>
+                  <Button data-ref="page-images-submit-publish" type="submit" disabled={pending !== null || (useProjectOverride && !overrideProject)}>
                     {pending === 'system-create' ? 'Publishing…' : 'Publish new version'}
                   </Button>
                 </div>
@@ -672,7 +673,7 @@ export function ImagesPage() {
                   />
                 </div>
                 <div style={{ marginTop: 12 }}>
-                  <Button data-ref="page-images-submit-rollback" type="submit" disabled={pending !== null || (useProjectOverride && !active)}>
+                  <Button data-ref="page-images-submit-rollback" type="submit" disabled={pending !== null || (useProjectOverride && !overrideProject)}>
                     {pending === 'system-rollback' ? 'Rolling back…' : 'Roll back'}
                   </Button>
                 </div>
@@ -730,11 +731,11 @@ export function ImagesPage() {
                     type="button"
                     variant="secondary"
                     onClick={() => handleGc(true)}
-                    disabled={pending !== null || (useProjectOverride && !active)}
+                    disabled={pending !== null || (useProjectOverride && !overrideProject)}
                   >
                     {pending === 'system-gc-preview' ? 'Running…' : 'Preview (dry run)'}
                   </Button>
-                  <Button data-ref="page-images-submit-gc" type="submit" disabled={pending !== null || (useProjectOverride && !active)}>
+                  <Button data-ref="page-images-submit-gc" type="submit" disabled={pending !== null || (useProjectOverride && !overrideProject)}>
                     {pending === 'system-gc' ? 'Running…' : 'Run GC'}
                   </Button>
                 </div>

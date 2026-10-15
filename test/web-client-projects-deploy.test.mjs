@@ -33,15 +33,17 @@ describe('projects lib contract', () => {
 
   it('fetches GET /api/projects on mount and exposes refresh/loading/error', () => {
     assert.match(lib, /\/api\/projects/);
-    for (const key of ['projects', 'activeId', 'setActiveId', 'refresh', 'loading', 'error']) {
+    for (const key of ['projects', 'refresh', 'loading', 'error']) {
       assert.ok(lib.includes(key), `missing context key ${key}`);
     }
+    assert.ok(!lib.includes('activeId'), 'global activeId must be removed');
+    assert.ok(!lib.includes('setActiveId'), 'global setActiveId must be removed');
   });
 
-  it('persists activeId in localStorage under activeProjectId, defaulting to the first project', () => {
-    assert.match(lib, /activeProjectId/);
-    assert.match(lib, /localStorage/);
-    assert.match(lib, /list\[0\]/);
+  it('has no global active selection; ProjectPicker is controlled via value/onChange', () => {
+    assert.ok(!lib.includes('activeProjectId'), 'global activeProjectId storage must be removed');
+    assert.match(lib, /value/);
+    assert.match(lib, /onChange/);
   });
 
   it('ProjectPicker renders a label+select with a >=44px target', () => {
@@ -77,9 +79,11 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('imageDisplay'), 'row must render the resolved image with version');
   });
 
-  it('marks the active project with a Badge and no Select active button', () => {
+  it('shows Running/Stopped status badges and no Active badge', () => {
     assert.match(projects, /<Badge/);
-    assert.ok(projects.includes('Active'), 'missing Active badge');
+    assert.ok(projects.includes('Running'), 'missing Running badge');
+    assert.ok(projects.includes('Stopped'), 'missing Stopped badge');
+    assert.ok(!projects.includes('Active'), 'Active badge must be removed');
     assert.ok(!projects.includes('Select active'), 'Select active action must be removed');
     assert.ok(!projects.includes('page-projects-row-select'), 'row select ref must be removed');
   });
@@ -101,7 +105,7 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('No projects yet'), 'missing empty state copy');
   });
 
-  it('fetches GET /api/config for the active project and shows mode/image/namespace/nodePort', () => {
+  it('fetches GET /api/config per project and shows mode/image/namespace/nodePort', () => {
     assert.match(projects, /\/api\/config\?projectId=/);
     for (const field of ['nodePort', 'namespace', 'registry']) {
       assert.ok(projects.includes(field), `missing config field ${field}`);

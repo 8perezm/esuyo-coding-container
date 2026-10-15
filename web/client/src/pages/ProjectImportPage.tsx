@@ -22,7 +22,7 @@ function errMsg(err: unknown): string {
 const MAX_FILE_BYTES = 512 * 1024;
 
 export function ProjectImportPage() {
-  const { setActiveId, refresh } = useProjects();
+  const { refresh } = useProjects();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -120,7 +120,6 @@ export function ProjectImportPage() {
         setFormError(errMsg(err));
         return;
       }
-      setActiveId(res.project.id);
       await refresh();
       navigate(`/projects/${encodeURIComponent(res.project.id)}/edit`);
     } catch (err) {

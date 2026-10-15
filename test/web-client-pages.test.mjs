@@ -60,14 +60,15 @@ describe('SshKeysPage contract', () => {
     assert.match(ssh, /stale/i);
   });
 
-  it('fetches the key via GET /api/key for the active project', () => {
+  it('fetches the key via GET /api/key for the selected project', () => {
     assert.match(ssh, /\/api\/key\?projectId=/);
-    assert.match(ssh, /activeProjectId/);
+    assert.match(ssh, /selectedId/);
     assert.match(ssh, /fingerprint/);
   });
 
   it('confirms before posting a key-rotate job with force', () => {
-    assert.match(ssh, /window\.confirm/);
+    assert.match(ssh, /ConfirmDialog/);
+    assert.match(ssh, /showRotateConfirm/);
     assert.match(ssh, /key-rotate/);
     assert.match(ssh, /force: true/);
   });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Pencil, Plus, Rocket, SquareTerminal, Trash2, Upload, Wrench } from 'lucide-react';
 import { api } from '../lib/api';
@@ -11,6 +11,7 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  Label,
   PageHeader,
   Spinner,
   Table,
@@ -58,10 +59,38 @@ function errMsg(err: unknown): string {
 
 type LifecycleOp = 'create' | 'deploy' | 'delete';
 
+type StatusFilter = 'all' | 'running' | 'stopped';
+type SortKey = 'name' | 'status' | 'image' | 'namespace' | 'nodePort';
+type SortDir = 'asc' | 'desc';
+
 const JOB_NOTICE_TTL_MS = 20000;
 
+const SORT_KEY_STORAGE_KEY = 'projectsTableSortKey';
+const SORT_DIR_STORAGE_KEY = 'projectsTableSortDir';
+const SORT_KEYS: SortKey[] = ['name', 'status', 'image', 'namespace', 'nodePort'];
+
+function readStoredSortKey(): SortKey {
+  try {
+    const raw = window.localStorage.getItem(SORT_KEY_STORAGE_KEY);
+    if (raw && (SORT_KEYS as string[]).includes(raw)) return raw as SortKey;
+  } catch {
+    /* storage unavailable — fall back to default */
+  }
+  return 'name';
+}
+
+function readStoredSortDir(): SortDir {
+  try {
+    const raw = window.localStorage.getItem(SORT_DIR_STORAGE_KEY);
+    if (raw === 'asc' || raw === 'desc') return raw;
+  } catch {
+    /* storage unavailable — fall back to default */
+  }
+  return 'asc';
+}
+
 export function ProjectsPage() {
-  const { projects, activeId, refresh, loading, error } = useProjects();
+  const { projects, refresh, loading, error } = useProjects();
   const [actionError, setActionError] = useState<string | null>(null);
   const [workloadsDeleteTarget, setWorkloadsDeleteTarget] = useState<Project | null>(null);
 
@@ -182,9 +211,96 @@ export function ProjectsPage() {
     [jobPendingKey],
   );
 
-  const activeProjects = projects.filter((p) => deployedIds?.has(p.id));
-  const inactiveProjects = projects.filter((p) => !deployedIds?.has(p.id));
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortKey, setSortKey] = useState<SortKey>(() => readStoredSortKey());
+  const [sortDir, setSortDir] = useState<SortDir>(() => readStoredSortDir());
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_KEY_STORAGE_KEY, sortKey);
+    } catch {
+      /* storage unavailable — sorting just won't persist */
+    }
+  }, [sortKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_DIR_STORAGE_KEY, sortDir);
+    } catch {
+      /* storage unavailable — sorting just won't persist */
+    }
+  }, [sortDir]);
+
   const workloadsLoading = deployedIds === null;
+
+  const toggleSort = useCallback(
+    (key: SortKey) => {
+      if (key === sortKey) {
+        setSortDir((prevDir) => (prevDir === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortKey(key);
+        setSortDir('asc');
+      }
+    },
+    [sortKey],
+  );
+
+  const sortIndicator = useCallback(
+    (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''),
+    [sortKey, sortDir],
+  );
+
+  const ariaSortFor = useCallback(
+    (key: SortKey): 'ascending' | 'descending' | 'none' =>
+      sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none',
+    [sortKey, sortDir],
+  );
+
+  const visibleProjects = useMemo(() => {
+    const filtered = projects.filter((p) => {
+      if (statusFilter === 'all') return true;
+      const isDeployed = deployedIds?.has(p.id) ?? false;
+      return statusFilter === 'running' ? isDeployed : !isDeployed;
+    });
+
+    const imageFor = (p: Project): string => {
+      const config = configs[p.id] ?? null;
+      const image = config?.merged.image;
+      const imageText = config
+        ? `${[image?.registry, image?.name].filter(Boolean).join('/') || '—'}${image?.tag ? `:${image.tag}` : ''}`
+        : '…';
+      return workloadImages[p.id] ?? imageText;
+    };
+    const namespaceFor = (p: Project): string => configs[p.id]?.merged.k8s?.namespace ?? '';
+    const nodePortFor = (p: Project): number | null => configs[p.id]?.merged.k8s?.nodePort ?? null;
+    const statusFor = (p: Project): string => (deployedIds?.has(p.id) ? 'running' : 'stopped');
+
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      switch (sortKey) {
+        case 'name':
+          return a.name.localeCompare(b.name) * dir;
+        case 'status': {
+          const cmp = statusFor(a).localeCompare(statusFor(b));
+          return (cmp !== 0 ? cmp : a.name.localeCompare(b.name)) * dir;
+        }
+        case 'image':
+          return imageFor(a).localeCompare(imageFor(b)) * dir;
+        case 'namespace':
+          return namespaceFor(a).localeCompare(namespaceFor(b)) * dir;
+        case 'nodePort': {
+          const av = nodePortFor(a);
+          const bv = nodePortFor(b);
+          if (av === null && bv === null) return a.name.localeCompare(b.name) * dir;
+          if (av === null) return 1;
+          if (bv === null) return -1;
+          return (av - bv) * dir;
+        }
+        default:
+          return 0;
+      }
+    });
+  }, [projects, configs, deployedIds, workloadImages, statusFilter, sortKey, sortDir]);
 
   const renderWorkloadsLoading = (ref: string) => (
     <div
@@ -200,7 +316,6 @@ export function ProjectsPage() {
   );
 
   const renderProjectRow = (p: Project) => {
-    const isSelected = p.id === activeId;
     const isDeployed = deployedIds?.has(p.id) ?? false;
     const config = configs[p.id] ?? null;
     const image = config?.merged.image;
@@ -214,15 +329,8 @@ export function ProjectsPage() {
     const notice = jobNotices[p.id] ?? null;
     return (
       <TR key={p.id}>
-        <TD>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            {p.name}{' '}
-            {isSelected && (
-              <Badge tone="accent">Active</Badge>
-            )}
-            {isDeployed ? <Badge tone="accent">Deployed</Badge> : <Badge>Stopped</Badge>}
-          </span>
-        </TD>
+        <TD>{p.name}</TD>
+        <TD>{isDeployed ? <Badge tone="accent">Running</Badge> : <Badge>Stopped</Badge>}</TD>
         <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-md)' }}>{imageDisplay}</TD>
         <TD>{config ? (k8s?.namespace ?? '—') : '…'}</TD>
         <TD>{config ? (k8s?.nodePort ?? '—') : '…'}</TD>
@@ -294,15 +402,40 @@ export function ProjectsPage() {
     );
   };
 
-  const renderProjectTable = (list: Project[], label: string) => (
-    <TableContainer data-ref={`page-projects-table-container-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
-      <Table aria-label={label} data-ref={`page-projects-table-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+  const renderSortableHeader = (label: string, key: SortKey, ref: string) => (
+    <TH aria-sort={ariaSortFor(key)}>
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        data-ref={ref}
+        aria-label={`Sort by ${label}`}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          font: 'inherit',
+          fontWeight: 'inherit',
+          color: 'inherit',
+          minHeight: 44,
+        }}
+      >
+        {label}
+        <span aria-hidden="true">{sortIndicator(key)}</span>
+      </button>
+    </TH>
+  );
+
+  const renderProjectTable = (list: Project[]) => (
+    <TableContainer data-ref="page-projects-table-container">
+      <Table aria-label="Projects" data-ref="page-projects-table">
         <THead>
           <TR>
-            <TH>Name</TH>
-            <TH>Image</TH>
-            <TH>Namespace</TH>
-            <TH>NodePort</TH>
+            {renderSortableHeader('Name', 'name', 'page-projects-sort-name')}
+            {renderSortableHeader('Status', 'status', 'page-projects-sort-status')}
+            {renderSortableHeader('Image', 'image', 'page-projects-sort-image')}
+            {renderSortableHeader('Namespace', 'namespace', 'page-projects-sort-namespace')}
+            {renderSortableHeader('NodePort', 'nodePort', 'page-projects-sort-nodeport')}
             <TH>Actions</TH>
           </TR>
         </THead>
@@ -358,30 +491,41 @@ export function ProjectsPage() {
         </div>
       ) : (
         <>
-          <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: '0 0 12px' }} data-ref="page-projects-active-heading">Active projects</h2>
+          <div
+            style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 0 12px' }}
+            data-ref="page-projects-toolbar"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Label htmlFor="page-projects-status-filter">Status</Label>
+              <select
+                id="page-projects-status-filter"
+                className="input"
+                style={{ minHeight: 44, minWidth: 160 }}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                data-ref="page-projects-status-filter"
+                aria-label="Filter by status"
+              >
+                <option value="all">All</option>
+                <option value="running">Running</option>
+                <option value="stopped">Stopped</option>
+              </select>
+            </div>
+          </div>
           {workloadsLoading ? (
-            renderWorkloadsLoading('page-projects-active-loading')
-          ) : activeProjects.length === 0 ? (
-            <Card style={{ marginBottom: 24 }} data-ref="page-projects-active-empty-card">
-              <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-projects-active-empty">
-                No active projects — nothing is currently deployed to the cluster.
+            renderWorkloadsLoading('page-projects-table-loading')
+          ) : visibleProjects.length === 0 ? (
+            <Card data-ref="page-projects-empty-filtered-card">
+              <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-projects-empty-filtered">
+                {statusFilter === 'running'
+                  ? 'No running projects — nothing is currently running on the cluster.'
+                  : statusFilter === 'stopped'
+                    ? 'No stopped projects — everything is running.'
+                    : 'No projects match this filter.'}
               </p>
             </Card>
           ) : (
-            <div style={{ marginBottom: 24 }} data-ref="page-projects-active-table">{renderProjectTable(activeProjects, 'Active projects')}</div>
-          )}
-
-          <h2 style={{ fontSize: 'var(--font-size-2xl)', margin: '0 0 12px' }} data-ref="page-projects-inactive-heading">Inactive projects</h2>
-          {workloadsLoading ? (
-            renderWorkloadsLoading('page-projects-inactive-loading')
-          ) : inactiveProjects.length === 0 ? (
-            <Card data-ref="page-projects-inactive-empty-card">
-              <p style={{ margin: 0, fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }} data-ref="page-projects-inactive-empty">
-                No inactive projects — everything is deployed.
-              </p>
-            </Card>
-          ) : (
-            <div data-ref="page-projects-inactive-table">{renderProjectTable(inactiveProjects, 'Inactive projects')}</div>
+            <div data-ref="page-projects-table-wrap">{renderProjectTable(visibleProjects)}</div>
           )}
         </>
       )}

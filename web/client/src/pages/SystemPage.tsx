@@ -364,8 +364,10 @@ function StateSummary({ projectId }: { projectId: string | null }) {
 }
 
 export function SystemPage() {
-  const { projects, activeId } = useProjects();
-  const active = projects.find((p) => p.id === activeId) ?? null;
+  const { projects } = useProjects();
+  // Validation needs a project context; default to the first project.
+  // State + init are global and use the repo default (projectId null).
+  const validationProjectId = projects[0]?.id ?? null;
 
   const [initTag, setInitTag] = useState('');
   const [initKeep, setInitKeep] = useState('10');
@@ -385,7 +387,7 @@ export function SystemPage() {
     setError(null);
     setJob(null);
     api
-      .post<JobResponse>('/api/jobs', { op: 'system-init', projectId: active?.id ?? null, args: parsed.args })
+      .post<JobResponse>('/api/jobs', { op: 'system-init', projectId: null, args: parsed.args })
       .then((created) => setJob(created))
       .catch((err) => setError(errMsg(err)))
       .finally(() => setPending(false));
@@ -396,10 +398,10 @@ export function SystemPage() {
       <PageHeader title="System" description="Cluster health, versions, and global configuration." />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        <GlobalConfigCard projectId={active?.id ?? null} />
+        <GlobalConfigCard projectId={validationProjectId} />
 
-        <section key={`state-${active?.id ?? 'none'}`}>
-          <StateSummary projectId={active?.id ?? null} />
+        <section key="state-global">
+          <StateSummary projectId={null} />
         </section>
 
         <section>

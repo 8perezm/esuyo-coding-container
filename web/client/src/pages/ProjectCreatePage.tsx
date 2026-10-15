@@ -16,7 +16,7 @@ function errMsg(err: unknown): string {
 }
 
 export function ProjectCreatePage() {
-  const { setActiveId, refresh } = useProjects();
+  const { refresh } = useProjects();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -35,7 +35,6 @@ export function ProjectCreatePage() {
       const res = await api.post<CreateProjectResponse>('/api/projects', {
         name: trimmedName,
       });
-      setActiveId(res.project.id);
       await refresh();
       navigate(`/projects/${encodeURIComponent(res.project.id)}/edit`);
     } catch (err) {
