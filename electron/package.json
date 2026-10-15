@@ -4,6 +4,7 @@
   "private": true,
   "description": "Installable desktop shell for the coding-container web GUI (Electron). The GUI and CLI run unchanged inside the window.",
   "author": "Esuyo",
+  "homepage": "https://github.com/Esuyo/esuyo-coding-container",
   "desktopName": "com.esuyo.coding-container",
   "main": "main.js",
   "scripts": {
