@@ -131,6 +131,7 @@ linux:
 
 deb:
   packageName: esuyo-coding-container
+  artifactName: esuyo-coding-container_${version}_${arch}.${ext}
 
 publish:
   provider: github
