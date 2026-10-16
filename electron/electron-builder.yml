@@ -123,12 +123,14 @@ mac:
 
 linux:
   icon: build/icons/
-  packageName: esuyo-coding-container
   target:
     - AppImage
     - deb
   category: Development
   maintainer: Esuyo
+
+deb:
+  packageName: esuyo-coding-container
 
 publish:
   provider: github
