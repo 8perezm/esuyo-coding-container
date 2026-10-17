@@ -106,3 +106,33 @@ export function getNamespaces() {
   }
   return parseNamespaces(nsJson, cmJson);
 }
+
+/**
+ * Best-effort read of one namespace's stored setup values (annotations).
+ * Returns {} when the namespace is missing, unreachable, or has no
+ * annotations. Never throws, so `setup` stays usable offline.
+ */
+export function readNamespaceSetupValues(ns) {
+  const name = String(ns ?? "").trim();
+  if (!name) return {};
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "get", "namespace", name, "-o", "json"], opts);
+    let obj;
+    try {
+      obj = typeof out === "string" ? JSON.parse(out) : out;
+    } catch {
+      return {};
+    }
+    const annotations = obj?.metadata?.annotations;
+    if (!annotations || typeof annotations !== "object") return {};
+    const values = {};
+    for (const [field, key] of Object.entries(SETUP_ANNOTATIONS)) {
+      const v = annotations[key];
+      if (typeof v === "string" && v.trim()) values[field] = v.trim();
+    }
+    return values;
+  } catch {
+    return {};
+  }
+}

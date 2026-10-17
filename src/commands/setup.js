@@ -5,7 +5,7 @@ import { globalConfigDir, globalConfigPath, PROJECT_ROOT } from "../config.js";
 import { ensureKeyPair } from "../utils/keys.js";
 import { exec, run } from "../utils/exec.js";
 import { kubectlExec } from "../utils/system-config.js";
-import { NAMESPACE_LABEL, SETUP_ANNOTATIONS } from "../utils/namespaces.js";
+import { NAMESPACE_LABEL, SETUP_ANNOTATIONS, readNamespaceSetupValues } from "../utils/namespaces.js";
 
 // Values that differ per environment. When neither a flag nor a prompt supplies
 // one, the generated config gets a clearly-marked placeholder instead of a guess.
@@ -254,7 +254,22 @@ export async function setup(opts = {}) {
       });
     }
   } else {
-    const values = await captureEnvironment(opts);
+    // Existing-namespace flow: the GUI hides registry/NFS and sends only
+    // --namespace. Fill blanks from the namespace's stored annotations so
+    // a reselect needs no retyping. Missing/offline degrades to the normal
+    // prompt-or-placeholder path below.
+    const effective = { ...opts };
+    if (typeof effective.namespace === "string" && effective.namespace.trim()) {
+      try {
+        const stored = readNamespaceSetupValues(normalizeNamespace(effective.namespace));
+        for (const field of ["registry", "nfsServer", "nfsBasePath"]) {
+          if (!effective[field] && stored[field]) effective[field] = stored[field];
+        }
+      } catch {
+        /* invalid name surfaces via captureEnvironment validation */
+      }
+    }
+    const values = await captureEnvironment(effective);
     fs.writeFileSync(cfgFile, renderTemplate(values));
     console.log(`created: ${cfgFile}`);
     await tagNamespaceBestEffort(values.namespace, values);

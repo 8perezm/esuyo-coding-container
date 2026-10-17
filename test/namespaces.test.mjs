@@ -9,6 +9,7 @@ import {
   SETUP_ANNOTATIONS,
   parseNamespaces,
   getNamespaces,
+  readNamespaceSetupValues,
 } from "../src/utils/namespaces.js";
 import { ensureNamespace } from "../src/commands/deploy.js";
 import {
@@ -138,7 +139,11 @@ function makeKubectlStub(dir) {
       'fs.appendFileSync(process.env.NS_RECORD, argv.join(" ") + "\\n");',
       'if (process.env.NS_FAIL_ALL === "1") { process.stderr.write("simulated offline\\n"); process.exit(1); }',
       'const joined = argv.join(" ");',
-      'if (joined.startsWith("get namespace ")) { process.exit(Number(process.env.NS_GET_NS_STATUS || "0")); }',
+      'if (joined.startsWith("get namespace ")) {',
+      '  const f = process.env.NS_GET_NS_JSON;',
+      '  if (f && fs.existsSync(f)) { process.stdout.write(fs.readFileSync(f, "utf8")); process.exit(0); }',
+      '  process.exit(Number(process.env.NS_GET_NS_STATUS || "0"));',
+      "}",
       'if (joined.startsWith("get ns ")) {',
       '  const f = process.env.NS_NS_JSON;',
       '  if (f && fs.existsSync(f)) { process.stdout.write(fs.readFileSync(f, "utf8")); process.exit(0); }',
@@ -156,7 +161,7 @@ function makeKubectlStub(dir) {
   return stubJs;
 }
 
-const ENV_KEYS = ["KUBECTL_BIN", "NS_RECORD", "NS_FAIL_ALL", "NS_NS_JSON", "NS_CM_JSON", "NS_GET_NS_STATUS"];
+const ENV_KEYS = ["KUBECTL_BIN", "NS_RECORD", "NS_FAIL_ALL", "NS_NS_JSON", "NS_CM_JSON", "NS_GET_NS_STATUS", "NS_GET_NS_JSON"];
 
 function snapshotEnv() {
   const s = {};
@@ -429,5 +434,85 @@ test("setup rejects an invalid namespace instead of writing it", async () => {
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prevXdg;
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readNamespaceSetupValues returns annotations, {} offline", () => {
+  const prev = snapshotEnv();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ns-"));
+  try {
+    const nsFile = path.join(dir, "single-ns.json");
+    fs.writeFileSync(
+      nsFile,
+      JSON.stringify({
+        metadata: {
+          name: "team-alpha",
+          annotations: {
+            "coding-container.io/registry": "registry.example.com/team",
+            "coding-container.io/nfs-server": "10.0.0.5",
+            "coding-container.io/nfs-base-path": "/workspaces",
+          },
+        },
+      })
+    );
+    const record = path.join(dir, "record.txt");
+    fs.writeFileSync(record, "");
+    process.env.KUBECTL_BIN = makeKubectlStub(dir);
+    process.env.NS_RECORD = record;
+    process.env.NS_GET_NS_JSON = nsFile;
+
+    assert.deepEqual(readNamespaceSetupValues("team-alpha"), {
+      registry: "registry.example.com/team",
+      nfsServer: "10.0.0.5",
+      nfsBasePath: "/workspaces",
+    });
+
+    process.env.NS_FAIL_ALL = "1";
+    assert.deepEqual(readNamespaceSetupValues("team-alpha"), {});
+  } finally {
+    restoreEnv(prev);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setup with only namespace fills registry/NFS from cluster annotations", async () => {
+  const prev = snapshotEnv();
+  const { prevXdg, dir, cfgFile } = isolateGlobalConfig();
+  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "ns-"));
+  try {
+    const nsFile = path.join(stubDir, "single-ns.json");
+    fs.writeFileSync(
+      nsFile,
+      JSON.stringify({
+        metadata: {
+          name: "team-alpha",
+          annotations: {
+            "coding-container.io/registry": "registry.example.com/team",
+            "coding-container.io/nfs-server": "10.0.0.5",
+            "coding-container.io/nfs-base-path": "/workspaces",
+          },
+        },
+      })
+    );
+    const record = path.join(stubDir, "record.txt");
+    fs.writeFileSync(record, "");
+    process.env.KUBECTL_BIN = makeKubectlStub(stubDir);
+    process.env.NS_RECORD = record;
+    process.env.NS_GET_NS_JSON = nsFile;
+    process.env.NS_GET_NS_STATUS = "0";
+
+    await setup({ namespace: "team-alpha" });
+
+    const yaml = fs.readFileSync(cfgFile, "utf8");
+    assert.ok(yaml.includes('registry: "registry.example.com/team"'), yaml);
+    assert.ok(yaml.includes('server: "10.0.0.5"'), yaml);
+    assert.ok(yaml.includes('basePath: "/workspaces"'), yaml);
+    assert.ok(yaml.includes('namespace: "team-alpha"'), yaml);
+  } finally {
+    restoreEnv(prev);
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(stubDir, { recursive: true, force: true });
   }
 });

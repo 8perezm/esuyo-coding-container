@@ -170,7 +170,12 @@ export function SetupPage() {
       }
       setPending(true);
       try {
-        const args = buildSetupArgs(registry, nfsServer, nfsBasePath, effectiveNamespace);
+        // Existing-namespace flow: send only the namespace. The server
+        // fills registry/NFS from the namespace's stored values.
+        const args =
+          mode === 'existing'
+            ? buildSetupArgs('', '', '', selectedName)
+            : buildSetupArgs(registry, nfsServer, nfsBasePath, effectiveNamespace);
         const job = await api.post<JobResponse>('/api/jobs', { op: 'setup', args });
         setResult(job);
       } catch (err) {
@@ -273,7 +278,7 @@ export function SetupPage() {
                 >
                   {(namespaces ?? []).map((ns) => (
                     <option key={ns.name} value={ns.name}>
-                      {ns.name} ({ns.initialized ? 'ready' : 'empty'})
+                      {ns.name}
                     </option>
                   ))}
                 </select>
@@ -321,6 +326,7 @@ export function SetupPage() {
               One name per developer keeps work private; one shared name lets a team float together.
             </p>
           </div>
+          {mode === 'existing' && canPickExisting ? null : (
           <div style={{ display: 'grid', gap: 12, maxWidth: 520, marginBottom: 16 }}>
             <div>
               <Label htmlFor="setup-registry">Container registry (optional)</Label>
@@ -368,6 +374,7 @@ export function SetupPage() {
               />
             </div>
           </div>
+          )}
           <Button data-ref="page-setup-run-button" type="submit" disabled={pending || newNamespaceInvalid}>
             {pending ? 'Starting…' : 'Run setup'}
           </Button>
