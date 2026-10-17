@@ -2,13 +2,12 @@
 // Runs in the window before the web UI loads (context isolation on, no Node
 // access for the page itself).
 //
-// Three jobs:
+// Two jobs:
 //   1. Tag every /api request so the server knows it is the desktop app
 //      (long-lived session). Browsers never send this header.
 //   2. Watch the page's own sign-in / password-change / sign-out requests and
 //      report them to the main process, so the encrypted stored sign-in
 //      stays in sync. The server and the web UI are unchanged.
-//   3. Expose a minimal setup API used only by the first-run window.
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -97,10 +96,6 @@ if (typeof window.fetch === "function") {
     return response;
   };
 }
-
-contextBridge.exposeInMainWorld("desktopSetup", {
-  saveSetup: (email, password) => ipcRenderer.invoke("desktop:save-setup", { email, password }),
-});
 
 // Frameless window controls for the main window. Only present inside the
 // desktop app: in a normal browser this bridge never loads, so the web UI

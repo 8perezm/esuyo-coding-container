@@ -6,8 +6,9 @@
 // server on a loopback port and shows it in a window. It only adds what a
 // desktop install needs:
 //
-//   - first-run sign-in setup (email + password, stored encrypted with the
-//     OS keychain via Electron safeStorage)
+//   - first-run sign-in inside the main window (same size, never closes;
+//     the stored account is kept encrypted with the OS keychain via
+//     Electron safeStorage)
 //   - automatic sign-in on launch (stays signed in until sign-out)
 //   - startup warnings when external tools are missing
 //   - auto-updates for packaged builds (skipped for Store packages)
@@ -39,7 +40,6 @@ const APP_ROOT = isDev ? path.resolve(__dirname, "..") : app.getAppPath();
 const SERVER_ENTRY = path.join(APP_ROOT, "web", "server", "server.js");
 
 let mainWindow = null;
-let setupWindow = null;
 let serverChild = null;
 let quitting = false;
 
@@ -403,7 +403,7 @@ function registerUpdateControls() {
   });
 }
 
-function createMainWindow(baseUrl) {
+function createMainWindow(initialUrl) {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -428,49 +428,13 @@ function createMainWindow(baseUrl) {
   });
   mainWindow.on("maximize", broadcastMaximized);
   mainWindow.on("unmaximize", broadcastMaximized);
-  mainWindow.loadURL(baseUrl);
+  mainWindow.loadURL(initialUrl);
 }
 
-function showSetupWindow() {
-  return new Promise((resolve) => {
-    setupWindow = new BrowserWindow({
-      width: 460,
-      height: 600,
-      resizable: false,
-      title: "Esuyo Coding Container",
-      autoHideMenuBar: true,
-      webPreferences: {
-        preload: path.join(__dirname, "preload.js"),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-    let done = false;
-    const finish = (value) => {
-      if (done) return;
-      done = true;
-      ipcMain.removeHandler("desktop:save-setup");
-      try {
-        setupWindow?.close();
-      } catch {
-        // Already closed.
-      }
-      setupWindow = null;
-      resolve(value);
-    };
-    setupWindow.on("closed", () => finish(null));
-    setupWindow.loadFile(path.join(__dirname, "setup.html"));
-    // Plain handle (not once): a validation failure returns an error and
-    // the form can be submitted again.
-    ipcMain.handle("desktop:save-setup", (_event, { email, password } = {}) => {
-      const err = validateCredentials(email, password);
-      if (err) return { ok: false, error: err };
-      finish({ email: String(email).trim(), password });
-      return { ok: true };
-    });
-  });
-}
+// First-run registration happens inside the main window (the web UI
+// sign-in page), so this window is never closed and replaced. The preload
+// script reports the registration back over desktop:auth-login, which keeps
+// the encrypted stored sign-in in sync for the next launch.
 
 // ---------------------------------------------------------------- app ---
 
@@ -548,16 +512,7 @@ app.whenReady().then(async () => {
     });
   }
 
-  let credentials = loadCredentials(credsPath);
-  if (!credentials) {
-    const created = await showSetupWindow().catch(() => null);
-    if (!created) {
-      app.quit();
-      return;
-    }
-    saveCredentials(credsPath, created.email, created.password);
-    credentials = created;
-  }
+  const credentials = loadCredentials(credsPath);
 
   let port;
   try {
@@ -577,10 +532,13 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  // Without stored credentials the server starts unregistered: the sign-in
+  // page in the main window offers registration (loopback only), which the
+  // preload script reports back so the encrypted copy is saved.
   serverChild = startServer({
     port,
-    email: credentials.email,
-    password: credentials.password,
+    email: credentials?.email ?? "",
+    password: credentials?.password ?? "",
   });
 
   if (!(await waitForHealth(baseUrl))) {
@@ -592,11 +550,16 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // If the stored sign-in no longer matches (for example it was changed in
-  // another browser), this quietly fails and the sign-in page appears.
-  await seedLoginCookie(baseUrl, credentials.email, credentials.password);
-
-  createMainWindow(baseUrl);
+  if (credentials) {
+    // If the stored sign-in no longer matches (for example it was changed in
+    // another browser), this quietly fails and the sign-in page appears.
+    await seedLoginCookie(baseUrl, credentials.email, credentials.password);
+    createMainWindow(baseUrl);
+  } else {
+    // Fresh install: the same window shows the registration form, which
+    // continues to the setup page once the account is created.
+    createMainWindow(`${baseUrl}/login?next=${encodeURIComponent("/setup")}`);
+  }
 
   if (autoUpdater && app.isPackaged && !process.windowsStore) {
     autoUpdater.checkForUpdatesAndNotify().catch(() => {

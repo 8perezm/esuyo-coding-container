@@ -58,11 +58,13 @@ export function LoginPage() {
       const unregistered = status && !status.registered;
       if (unregistered && status.canRegister) {
         await register(email.trim(), password);
+        // New account: continue to the setup page in the same window.
+        navigate('/setup', { replace: true });
       } else {
         await login(email.trim(), password);
+        const params = new URLSearchParams(window.location.search);
+        navigate(params.get('next') || '/', { replace: true });
       }
-      const params = new URLSearchParams(window.location.search);
-      navigate(params.get('next') || '/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed');
     } finally {

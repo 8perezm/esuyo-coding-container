@@ -11,6 +11,7 @@ import {
   buildJobArgv,
   buildStarterYaml,
   captureOutput,
+  clearClusterCache,
   configuredPorts,
   createServer,
   defaultAuthFile,
@@ -648,6 +649,145 @@ test("findClaimedNodePorts: flags ports claimed by other saved configs", () => {
   );
   assert.deepEqual(findClaimedNodePorts(wanted, []), []);
 });
+test("buildJobArgv: setup passes --namespace through", () => {
+  assert.deepEqual(buildJobArgv("setup", {}, {}), ["setup"]);
+  assert.deepEqual(
+    buildJobArgv(
+      "setup",
+      {
+        registry: "registry.example.com/you",
+        nfsServer: "10.0.0.5",
+        nfsBasePath: "/data",
+        namespace: "team-alpha",
+      },
+      {}
+    ),
+    [
+      "setup",
+      "--namespace",
+      "team-alpha",
+      "--registry",
+      "registry.example.com/you",
+      "--nfs-server",
+      "10.0.0.5",
+      "--nfs-base-path",
+      "/data",
+    ]
+  );
+  // Blank/absent namespace is dropped; other flags still pass through.
+  assert.deepEqual(buildJobArgv("setup", { namespace: "", registry: "r.example.com/me" }, {}), [
+    "setup",
+    "--registry",
+    "r.example.com/me",
+  ]);
+});
+
+test("http: GET /api/cluster/namespaces lists labeled namespaces, offline degrades", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-namespaces-"));
+  const prevKubectl = process.env.KUBECTL_BIN;
+  const nsJson = JSON.stringify({
+    items: [
+      // Deliberately unsorted: the endpoint must return alphabetical order.
+      { metadata: { name: "team-alpha", creationTimestamp: "2026-02-01T00:00:00Z" } },
+      {
+        metadata: {
+          name: "coding",
+          annotations: {
+            "coding-container.io/registry": "registry.example.com/you",
+            "coding-container.io/nfs-server": "10.0.0.5",
+            "coding-container.io/nfs-base-path": "/data",
+          },
+          creationTimestamp: "2026-01-01T00:00:00Z",
+        },
+      },
+    ],
+  });
+  const cmJson = JSON.stringify({
+    items: [{ metadata: { namespace: "coding", name: "coding-system" } }],
+  });
+  const stubPath = path.join(tmp, "kubectl-stub.js");
+  fs.writeFileSync(
+    stubPath,
+    [
+      'const joined = process.argv.slice(2).join(" ");',
+      'function out(s) { process.stdout.write(s + "\\n"); }',
+      'function die(msg) { process.stderr.write(msg + "\\n"); process.exit(1); }',
+      'if (joined.startsWith("get ns")) {',
+      `  out(${JSON.stringify(nsJson)});`,
+      '} else if (joined.startsWith("get cm")) {',
+      `  out(${JSON.stringify(cmJson)});`,
+      "} else {",
+      '  die("unexpected kubectl args: " + joined);',
+      "}",
+    ].join("\n")
+  );
+  process.env.KUBECTL_BIN = stubPath;
+  try {
+    const env = {
+      adminEmail: "admin@example.com",
+      adminPassword: "s3cret",
+      port: 0,
+      projectsFile: path.join(tmp, "projects.json"),
+      allowedOrigin: "",
+    };
+    const server = createServer(env);
+    await new Promise((resolve) => server.listen(0, resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      // Gated without a session.
+      assert.equal((await fetch(`${base}/api/cluster/namespaces`)).status, 401);
+
+      const login = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com", password: "s3cret" }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+
+      const r = await fetch(`${base}/api/cluster/namespaces`, { headers: { cookie } });
+      assert.equal(r.status, 200);
+      const body = await r.json();
+      assert.equal(body.ok, true);
+      assert.deepEqual(
+        body.namespaces.map((n) => n.name),
+        ["coding", "team-alpha"]
+      );
+      assert.deepEqual(body.namespaces[0], {
+        name: "coding",
+        initialized: true,
+        setupValues: {
+          registry: "registry.example.com/you",
+          nfsServer: "10.0.0.5",
+          nfsBasePath: "/data",
+        },
+        createdAt: "2026-01-01T00:00:00Z",
+      });
+      assert.deepEqual(body.namespaces[1], {
+        name: "team-alpha",
+        initialized: false,
+        setupValues: {},
+        createdAt: "2026-02-01T00:00:00Z",
+      });
+
+      // Unreachable cluster degrades to ok:false with an empty list.
+      clearClusterCache();
+      fs.writeFileSync(stubPath, 'process.stderr.write("no cluster\\n"); process.exit(1);\n');
+      const offline = await fetch(`${base}/api/cluster/namespaces`, { headers: { cookie } });
+      assert.equal(offline.status, 200);
+      const offlineBody = await offline.json();
+      assert.equal(offlineBody.ok, false);
+      assert.deepEqual(offlineBody.namespaces, []);
+      assert.ok(offlineBody.error);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    if (prevKubectl === undefined) delete process.env.KUBECTL_BIN;
+    else process.env.KUBECTL_BIN = prevKubectl;
+  }
+});
+
 test("http: validate mentions cluster-taken NodePorts but still passes; silent offline", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-ports-"));
   const prevXdg = process.env.XDG_CONFIG_HOME;

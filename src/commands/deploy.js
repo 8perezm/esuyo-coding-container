@@ -8,14 +8,23 @@ import { imageRef } from "../config.js";
 import { addHostEntry, ephemeralKnownHostsFile, removeLegacyKnownHostsFile, sshAlias, sshConfigPath } from "../utils/ssh-config.js";
 import { findNodePortOwner } from "../utils/project.js";
 import { kubectlExec, resolveDeployTag, SYSTEM_CM_NAME } from "../utils/system-config.js";
+import { NAMESPACE_LABEL } from "../utils/namespaces.js";
+import { setupAnnotationPairs } from "./setup.js";
 
-export async function ensureNamespace(ns) {
+export async function ensureNamespace(ns, { setupValues } = {}) {
   const { cmd, args, opts } = kubectlExec();
   try {
     exec(cmd, [...args, "get", "namespace", ns], opts);
   } catch {
     console.log(`Creating namespace ${ns} ...`);
     await run(cmd, [...args, "create", "namespace", ns], opts);
+  }
+  // Re-assert the label on every deploy/init: unlabeled namespaces are not
+  // listed as coding-container namespaces, so the invariant repairs itself.
+  await run(cmd, [...args, "label", "namespace", ns, NAMESPACE_LABEL, "--overwrite"], opts);
+  const pairs = setupAnnotationPairs(setupValues);
+  if (pairs.length) {
+    await run(cmd, [...args, "annotate", "namespace", ns, "--overwrite", ...pairs], opts);
   }
 }
 
@@ -35,7 +44,13 @@ export async function deploy(cfg, { wait = true } = {}) {
   const publicKey = readPublicKey(publicPath);
 
   const ns = cfg.k8s.namespace;
-  await ensureNamespace(ns);
+  await ensureNamespace(ns, {
+    setupValues: {
+      registry: cfg.image?.registry,
+      nfsServer: cfg.nfs?.server,
+      nfsBasePath: cfg.nfs?.basePath,
+    },
+  });
 
   // Fail fast on a taken NodePort: applying anyway leaves a partial state
   // (deployment + ingress created, service invalid).

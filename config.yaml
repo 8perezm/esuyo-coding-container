@@ -8,6 +8,7 @@ project: my-project
 
 k8s:
   nodePort: 30022
+  # namespace: unset here -> global default; use one name per developer for private work, or one shared name per team.
   # Pin the pod to one named cluster node (kubectl get nodes). Empty/unset ->
   # the scheduler picks a node.
   # nodeName: worker-02

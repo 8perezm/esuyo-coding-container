@@ -51,6 +51,7 @@ import {
   writeProjects as sharedWriteProjects,
 } from "../../src/utils/projects.js";
 import { attachSshTerminal } from "./ssh-terminal.js";
+import { getNamespaces } from "../../src/utils/namespaces.js";
 
 // ---------------------------------------------------------------- paths ---
 
@@ -1508,6 +1509,7 @@ export function buildJobArgv(op, args = {}, opts = {}) {
   switch (op) {
     case "setup": {
       const argv = ["setup"];
+      if (has(a.namespace)) argv.push("--namespace", String(a.namespace));
       if (has(a.registry)) argv.push("--registry", String(a.registry));
       if (has(a.nfsServer)) argv.push("--nfs-server", String(a.nfsServer));
       if (has(a.nfsBasePath)) argv.push("--nfs-base-path", String(a.nfsBasePath));
@@ -2888,6 +2890,21 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
         error: err.message,
       });
     }
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cluster/namespaces") {
+    const body = getCachedCluster("namespaces", () => {
+      try {
+        const namespaces = [...getNamespaces()].sort((a, b) =>
+          String(a.name).localeCompare(String(b.name))
+        );
+        return { ok: true, namespaces };
+      } catch (err) {
+        return { ok: false, namespaces: [], error: err.message };
+      }
+    });
+    sendJson(res, 200, body);
     return;
   }
 
