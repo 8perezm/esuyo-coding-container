@@ -168,6 +168,10 @@ export function SetupPage() {
         setError('Pick a namespace from the list, or create a new one.');
         return;
       }
+      if (mode === 'new' && (!registry.trim() || !nfsServer.trim() || !nfsBasePath.trim())) {
+        setError('Container registry, NFS server, and NFS base path are required for a new area.');
+        return;
+      }
       setPending(true);
       try {
         // Existing-namespace flow: send only the namespace. The server
@@ -228,8 +232,10 @@ export function SetupPage() {
           <Wrench size={18} aria-hidden="true" /> Run setup
         </h2>
         <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }}>
-          Never overwrites existing files. Values left blank fall back to interactive prompts on
-          the server, or clearly-marked placeholders when non-interactive.
+          Never overwrites existing files.{' '}
+          {mode === 'existing' && canPickExisting
+            ? 'Uses the stored values for the selected area.'
+            : 'All fields are required to create a new area.'}
         </p>
         <form data-ref="page-setup-form" onSubmit={(e) => void submit(e)}>
           <div style={{ marginBottom: 16 }}>
@@ -297,11 +303,7 @@ export function SetupPage() {
                   <p data-ref="page-setup-namespaces-unavailable" style={{ margin: '0 0 8px', color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }}>
                     The list of existing areas is unavailable — type a name instead.
                   </p>
-                ) : (
-                  <p data-ref="page-setup-namespaces-empty" style={{ margin: '0 0 8px', color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }}>
-                    No existing areas yet — type a name to create the first one.
-                  </p>
-                )}
+                ) : null}
                 <Label htmlFor="setup-namespace-new">Area name</Label>
                 <Input
                   data-ref="page-setup-namespace-new-input"
@@ -329,7 +331,7 @@ export function SetupPage() {
           {mode === 'existing' && canPickExisting ? null : (
           <div style={{ display: 'grid', gap: 12, maxWidth: 520, marginBottom: 16 }}>
             <div>
-              <Label htmlFor="setup-registry">Container registry (optional)</Label>
+              <Label htmlFor="setup-registry">Container registry (required)</Label>
               <Input
                 data-ref="page-setup-registry-input"
                 id="setup-registry"
@@ -341,10 +343,11 @@ export function SetupPage() {
                 placeholder="registry.example.com/you"
                 autoComplete="off"
                 spellCheck={false}
+                required
               />
             </div>
             <div>
-              <Label htmlFor="setup-nfs-server">NFS server (optional)</Label>
+              <Label htmlFor="setup-nfs-server">NFS server (required)</Label>
               <Input
                 data-ref="page-setup-nfs-server-input"
                 id="setup-nfs-server"
@@ -356,10 +359,11 @@ export function SetupPage() {
                 placeholder="10.0.0.5"
                 autoComplete="off"
                 spellCheck={false}
+                required
               />
             </div>
             <div>
-              <Label htmlFor="setup-nfs-base-path">NFS base path (optional)</Label>
+              <Label htmlFor="setup-nfs-base-path">NFS base path (required)</Label>
               <Input
                 data-ref="page-setup-nfs-base-path-input"
                 id="setup-nfs-base-path"
@@ -371,6 +375,7 @@ export function SetupPage() {
                 placeholder="/workspaces"
                 autoComplete="off"
                 spellCheck={false}
+                required
               />
             </div>
           </div>
