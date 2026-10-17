@@ -67,7 +67,9 @@ const CLI_INDEX = path.join(REPO_ROOT, "src", "index.js");
 // --------------------------------------------------------------- constants ---
 
 export const SESSION_COOKIE = "gui_session";
-const SESSION_TTL_MS = 12 * 3600 * 1000; // 12h
+export const SESSION_TTL_MS = 12 * 3600 * 1000; // 12h browser sessions
+export const DESKTOP_SESSION_TTL_MS = 365 * 24 * 3600 * 1000; // 1y desktop sessions
+export const DESKTOP_HEADER = "x-esuyo-desktop";
 const MAX_JOB_LOG = 200 * 1024; // last 200KB of output per job
 const REDACTED = "***REDACTED***";
 
@@ -238,7 +240,7 @@ export function loadEnvConfig() {
 
 // ------------------------------------------------------------------ sessions ---
 
-// token -> { email, expiresAt }
+// token -> { email, expiresAt, isDesktop }
 const sessions = new Map();
 
 export function parseCookies(header) {
@@ -257,9 +259,10 @@ export function parseCookies(header) {
   return out;
 }
 
-function issueSession(email) {
+function issueSession(email, isDesktop = false) {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, { email, expiresAt: Date.now() + SESSION_TTL_MS });
+  const ttl = isDesktop ? DESKTOP_SESSION_TTL_MS : SESSION_TTL_MS;
+  sessions.set(token, { email, expiresAt: Date.now() + ttl, isDesktop: Boolean(isDesktop) });
   if (sessions.size % 50 === 0) pruneSessions();
   return token;
 }
@@ -280,6 +283,11 @@ function getSession(req) {
     sessions.delete(token);
     return null;
   }
+  // Desktop app only: sliding 1y expiry so it stays signed in while left
+  // open. Browser sessions stay fixed at 12h and must sign in again.
+  // Existing desktop tokens issued before the flag are upgraded on first use.
+  if (isDesktopReq(req) && !sess.isDesktop) sess.isDesktop = true;
+  if (sess.isDesktop) sess.expiresAt = Date.now() + DESKTOP_SESSION_TTL_MS;
   return { ...sess, token };
 }
 
@@ -409,6 +417,24 @@ export function isLoopbackReq(req) {
   const raw = req?.socket?.remoteAddress ?? "";
   const normalized = String(raw).replace(/^::ffff:/i, "").toLowerCase();
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+/**
+ * True for the desktop app: it sends `X-Esuyo-Desktop: 1` on every /api
+ * request (see electron/preload.js) over loopback. Browsers never send it,
+ * so their sessions keep the standard 12h expiry while the desktop app
+ * stays signed in.
+ */
+export function isDesktopReq(req) {
+  try {
+    const raw = req?.headers?.[DESKTOP_HEADER];
+    if (raw === undefined || raw === null) return false;
+    const v = String(raw).toLowerCase();
+    if (v !== "1" && v !== "true") return false;
+    return isLoopbackReq(req);
+  } catch {
+    return false;
+  }
 }
 
 export function clearAllSessions() {
@@ -1707,7 +1733,13 @@ export function startJob(op, projectId, argv, cwd) {
   let child;
   try {
     // Full environment passthrough (includes KUBECTL_BIN / DOCKER_BIN).
-    child = spawn(process.execPath, [CLI_INDEX, ...argv], { cwd, env: process.env });
+    // windowsHide keeps the CLI child (and its own kubectl/docker children)
+    // from flashing a terminal window when the desktop app has no console.
+    child = spawn(process.execPath, [CLI_INDEX, ...argv], {
+      cwd,
+      env: process.env,
+      windowsHide: true,
+    });
   } catch (err) {
     job.status = "error";
     job.finishedAt = new Date().toISOString();
@@ -2055,9 +2087,10 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       env.adminEmail = String(email).trim();
       env.adminPassword = "";
     }
-    const token = issueSession(String(email).trim());
+    const desktop = isDesktopReq(req);
+    const token = issueSession(String(email).trim(), desktop);
     sendJson(res, 201, { ok: true, email: String(email).trim() }, {
-      "Set-Cookie": sessionCookieHeader(token, 12 * 3600),
+      "Set-Cookie": sessionCookieHeader(token, Math.floor((desktop ? DESKTOP_SESSION_TTL_MS : SESSION_TTL_MS) / 1000)),
     });
     return;
   }
@@ -2085,9 +2118,10 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
         cleanEmail.toLowerCase() === effective.record.email.toLowerCase() &&
         verifyAuthPassword(effective.record, password)
       ) {
-        const token = issueSession(effective.record.email);
+        const desktop = isDesktopReq(req);
+        const token = issueSession(effective.record.email, desktop);
         sendJson(res, 200, { ok: true, email: effective.record.email }, {
-          "Set-Cookie": sessionCookieHeader(token, 12 * 3600),
+          "Set-Cookie": sessionCookieHeader(token, Math.floor((desktop ? DESKTOP_SESSION_TTL_MS : SESSION_TTL_MS) / 1000)),
         });
         return;
       }
@@ -2102,9 +2136,10 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
       typeof password === "string" &&
       password === env.adminPassword
     ) {
-      const token = issueSession(env.adminEmail);
+      const desktop = isDesktopReq(req);
+      const token = issueSession(env.adminEmail, desktop);
       sendJson(res, 200, { ok: true, email: env.adminEmail }, {
-        "Set-Cookie": sessionCookieHeader(token, 12 * 3600),
+        "Set-Cookie": sessionCookieHeader(token, Math.floor((desktop ? DESKTOP_SESSION_TTL_MS : SESSION_TTL_MS) / 1000)),
       });
       return;
     }
@@ -2132,6 +2167,20 @@ async function handleApi(req, res, env, projectsFile, url, pathname, method) {
     sessions.delete(session.token);
     sendJson(res, 401, { error: "unauthorized" });
     return;
+  }
+  // Desktop app only: refresh the cookie alongside the sliding server expiry
+  // above, otherwise the cookie's own Max-Age would still drop the session.
+  // Browser sessions stay fixed at 12h. Skipped for sign-out, which clears
+  // the cookie.
+  if (session.isDesktop && !(method === "POST" && pathname === "/api/logout")) {
+    try {
+      res.setHeader(
+        "Set-Cookie",
+        sessionCookieHeader(session.token, Math.floor(DESKTOP_SESSION_TTL_MS / 1000))
+      );
+    } catch {
+      // Headers already sent or unavailable — the server session is still renewed.
+    }
   }
 
   if (method === "GET" && pathname === "/api/me") {

@@ -631,7 +631,7 @@ function clusterErr(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
     return 'endpoint not found (404) — the GUI server is running old code. Restart it from this repo (see below) so it serves /api/cluster/*.';
   }
-  if (err instanceof ApiError && err.status === 401) return 'Unauthorized — log in again.';
+  if (err instanceof ApiError && err.status === 401) return 'Session expired — redirecting to sign-in…';
   return errMsg(err);
 }
 

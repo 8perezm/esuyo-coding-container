@@ -31,12 +31,16 @@ export const INIT_HINT =
 export function kubectlExec() {
   const bin = process.env.KUBECTL_BIN || "kubectl";
   if (process.env.KUBECTL_BIN && /\.(c|m)?js$/.test(bin)) {
-    return { cmd: process.execPath, args: [bin], opts: {} };
+    return { cmd: process.execPath, args: [bin], opts: { windowsHide: true } };
   }
-  const opts =
-    process.env.KUBECTL_BIN && process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)
+  // windowsHide keeps kubectl from flashing a terminal window when the
+  // parent has no console (notably the packaged desktop app). No-op elsewhere.
+  const opts = {
+    windowsHide: true,
+    ...(process.env.KUBECTL_BIN && process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)
       ? { shell: true }
-      : {};
+      : {}),
+  };
   return { cmd: bin, args: [], opts };
 }
 

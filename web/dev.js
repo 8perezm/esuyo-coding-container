@@ -67,6 +67,7 @@ function launch(name, cmd, args, cwd) {
     cwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
     ...(useShell ? { shell: true } : {}),
   });
   child.on("error", (err) => {

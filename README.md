@@ -129,5 +129,6 @@ MIT. See [LICENSE](./LICENSE).
 - [Project Structure](./docs/project-structure.md) — Folder layout
 - [Development Guide](./docs/development.md) — Local setup for contributors
 - [App config & setup files](./docs/config-files.md) — Persisting tool configs via /workspace
+- [Windows setup](./docs/windows-setup.md) — Docker, kubectl, K3s, registry, and kubeconfig on Windows
 - [Plan: Additional NFS volumes](./docs/build/additional-volumes.md) — Design history for extra volumes
 - [Plan: Public prebuilt images](./docs/build/public-images.md) — Design history for public images

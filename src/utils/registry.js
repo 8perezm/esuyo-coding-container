@@ -88,6 +88,7 @@ export function queryCredentialHelper(store, host, spawn = spawnSync) {
           encoding: "utf8",
           stdio: ["pipe", "pipe", "pipe"],
           timeout: 15000,
+          windowsHide: true,
         });
         if (res.error || res.status !== 0 || !res.stdout) continue;
         const parsed = JSON.parse(res.stdout.trim());

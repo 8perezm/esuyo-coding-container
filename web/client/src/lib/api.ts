@@ -23,6 +23,28 @@ async function parseBody(res: Response): Promise<unknown> {
   }
 }
 
+function notifyUnauthorized(path: string, status: number): void {
+  // Expired/invalid sessions surface as 401 from authenticated endpoints.
+  // Broadcast so AuthContext can sign out and RequireAuth redirects to
+  // sign-in. Sign-in attempts themselves 401 on bad credentials — never
+  // broadcast those, the login form already shows the error.
+  try {
+    if (!shouldBroadcastUnauthorized(path, status)) return;
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('gui:unauthorized', { detail: { path } }));
+    }
+  } catch {
+    /* best effort — the ApiError below still reaches the caller */
+  }
+}
+
+/** Pure check for the 401 broadcast above (unit-tested). */
+export function shouldBroadcastUnauthorized(path: string, status: number): boolean {
+  if (status !== 401) return false;
+  if (path === '/api/login' || path === '/api/register') return false;
+  return true;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: 'same-origin',
@@ -31,6 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const body = await parseBody(res);
   if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized(path, res.status);
     const message =
       (body as { error?: string; message?: string } | null)?.error ??
       (body as { message?: string } | null)?.message ??

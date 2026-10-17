@@ -1,3 +1,10 @@
+export type DesktopUpdateState = 'unknown' | 'checking' | 'none' | 'available' | 'ready';
+
+export interface DesktopUpdateStatus {
+  state: DesktopUpdateState;
+  version?: string | null;
+}
+
 export interface DesktopWindowApi {
   isDesktop: true;
   minimize: () => void;
@@ -5,6 +12,10 @@ export interface DesktopWindowApi {
   close: () => void;
   isMaximized: () => Promise<boolean>;
   onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
+  checkForUpdates: () => Promise<{ ok: boolean }>;
+  installUpdate: () => void;
+  openDownloadPage: () => void;
+  onUpdateStatus: (callback: (status: DesktopUpdateStatus) => void) => () => void;
 }
 
 export function getDesktopApi(): DesktopWindowApi | null {

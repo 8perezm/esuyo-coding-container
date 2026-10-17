@@ -12,7 +12,7 @@
 //   - startup warnings when external tools are missing
 //   - auto-updates for packaged builds (skipped for Store packages)
 
-const { app, BrowserWindow, dialog, ipcMain, session, safeStorage, Menu } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, session, safeStorage, Menu, shell } = require("electron");
 const { utilityProcess } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -273,6 +273,7 @@ async function seedLoginCookie(baseUrl, email, password) {
         headers: {
           "content-type": "application/json",
           "content-length": Buffer.byteLength(payload),
+          "x-esuyo-desktop": "1",
         },
       },
       (res) => {
@@ -333,6 +334,72 @@ function registerWindowControls() {
   });
   ipcMain.on("desktop:window-close", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+}
+
+// -------------------------------------------------- app updates ---
+// The NSIS build checks GitHub releases for updates. Status is forwarded
+// to the window so the pages can show an "update available" line; the
+// download location opens in the browser as a fallback.
+
+function getDownloadPageUrl() {
+  try {
+    const manifest = require(path.join(__dirname, "package.json"));
+    if (typeof manifest?.homepage === "string" && manifest.homepage) {
+      return `${String(manifest.homepage).replace(/\/+$/, "")}/releases`;
+    }
+  } catch {
+    // Fall through to the default below.
+  }
+  return "https://github.com/Esuyo/esuyo-coding-container/releases";
+}
+
+function broadcastUpdateStatus(status) {
+  try {
+    mainWindow?.webContents.send("desktop:update-status", status);
+  } catch {
+    // Window gone.
+  }
+}
+
+function registerUpdateControls() {
+  ipcMain.handle("desktop:update-check", async () => {
+    if (!autoUpdater || !app.isPackaged || process.windowsStore) return { ok: false };
+    try {
+      await autoUpdater.checkForUpdates();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+  ipcMain.on("desktop:update-install", () => {
+    try {
+      quitting = true;
+      autoUpdater?.quitAndInstall(false, true);
+    } catch {
+      // No update ready.
+    }
+  });
+  ipcMain.on("desktop:open-download-page", async () => {
+    try {
+      await shell.openExternal(getDownloadPageUrl());
+    } catch {
+      // No browser to open.
+    }
+  });
+
+  if (!autoUpdater) return;
+  autoUpdater.on("update-available", (info) => {
+    broadcastUpdateStatus({ state: "available", version: info?.version ?? null });
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    broadcastUpdateStatus({ state: "ready", version: info?.version ?? null });
+  });
+  autoUpdater.on("update-not-available", () => {
+    broadcastUpdateStatus({ state: "none" });
+  });
+  autoUpdater.on("error", () => {
+    broadcastUpdateStatus({ state: "none" });
   });
 }
 
@@ -447,6 +514,7 @@ app.whenReady().then(async () => {
   }
   registerAuthSync(credsPath);
   registerWindowControls();
+  registerUpdateControls();
 
   const missing = checkRequiredTools();
   if (missing.length > 0) await warnMissingTools(missing);

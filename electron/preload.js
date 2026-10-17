@@ -2,13 +2,17 @@
 // Runs in the window before the web UI loads (context isolation on, no Node
 // access for the page itself).
 //
-// Two jobs:
-//   1. Watch the page's own sign-in / password-change / sign-out requests and
+// Three jobs:
+//   1. Tag every /api request so the server knows it is the desktop app
+//      (long-lived session). Browsers never send this header.
+//   2. Watch the page's own sign-in / password-change / sign-out requests and
 //      report them to the main process, so the encrypted stored sign-in
 //      stays in sync. The server and the web UI are unchanged.
-//   2. Expose a minimal setup API used only by the first-run window.
+//   3. Expose a minimal setup API used only by the first-run window.
 
 const { contextBridge, ipcRenderer } = require("electron");
+
+const DESKTOP_HEADER = "X-Esuyo-Desktop";
 
 const AUTH_PATHS = new Set(["/api/login", "/api/register", "/api/logout", "/api/change-password"]);
 
@@ -68,8 +72,20 @@ function reportAuthRequest(pathname, payload) {
 
 if (typeof window.fetch === "function") {
   const originalFetch = window.fetch.bind(window);
+  const withDesktopHeader = (input, init) => {
+    try {
+      if (!pathnameOf(input).startsWith("/api/")) return [input, init];
+      const base = init?.headers ?? (input instanceof Request ? input.headers : {});
+      const headers = new Headers(base);
+      headers.set(DESKTOP_HEADER, "1");
+      return [input, { ...(init ?? {}), headers }];
+    } catch {
+      return [input, init];
+    }
+  };
   window.fetch = async function desktopFetch(input, init) {
-    const response = await originalFetch(input, init);
+    const [markedInput, markedInit] = withDesktopHeader(input, init);
+    const response = await originalFetch(markedInput, markedInit);
     try {
       const pathname = pathnameOf(input);
       if (AUTH_PATHS.has(pathname) && methodOf(input, init) === "POST" && response.ok) {
@@ -100,5 +116,14 @@ contextBridge.exposeInMainWorld("desktop", {
     const listener = (_event, maximized) => callback(Boolean(maximized));
     ipcRenderer.on("desktop:window-maximized", listener);
     return () => ipcRenderer.removeListener("desktop:window-maximized", listener);
+  },
+  checkForUpdates: () => ipcRenderer.invoke("desktop:update-check"),
+  installUpdate: () => ipcRenderer.send("desktop:update-install"),
+  openDownloadPage: () => ipcRenderer.send("desktop:open-download-page"),
+  onUpdateStatus: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("desktop:update-status", listener);
+    return () => ipcRenderer.removeListener("desktop:update-status", listener);
   },
 });

@@ -10,6 +10,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { ProfileBlock } from './ProfileBlock';
+import { DesktopUpdateNotice } from './DesktopUpdateNotice';
 
 export interface NavEntry {
   to: string;
@@ -122,6 +123,7 @@ export function Sidebar({ open, onClose, showSetup = false, width = 260, onWidth
           })}
         </nav>
         <ProfileBlock />
+        <DesktopUpdateNotice />
         {onWidthChange && (
           <div
             className={`sidebar-resize-handle${resizing ? ' sidebar-resize-handle-resizing' : ''}`}
