@@ -201,7 +201,7 @@ function startPortForward({ namespace, service, sshPort }, localPort) {
   const child = spawn(
     cmd,
     [...args, "-n", namespace, "port-forward", `svc/${service}`, `${localPort}:${sshPort}`],
-    { ...opts, stdio: ["ignore", "pipe", "pipe"] }
+    { windowsHide: true, ...opts, stdio: ["ignore", "pipe", "pipe"] }
   );
   let settled = false;
   return new Promise((resolve, reject) => {

@@ -47,6 +47,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Expired sessions surface as 401 from any authenticated endpoint (the
+  // dashboard polls cluster status). Sign out locally so RequireAuth sends
+  // the user back to sign-in instead of showing cluster errors.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener('gui:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('gui:unauthorized', onUnauthorized);
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     const me = await api.post<User>('/api/login', { email, password });
     setUser(me);

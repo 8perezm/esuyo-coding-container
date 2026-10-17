@@ -9,7 +9,7 @@ The desktop app (`electron/`) is a thin shell: the web GUI and the terminal work
 - **First-run setup window** (`setup.html`): collects the sign-in email + password (validated: real email shape, password ≥ 8 characters).
 - **Encrypted sign-in storage:** the account is kept with the OS keychain (`safeStorage`, `credentials.enc` under Electron `userData`). Launch signs in automatically and lands on the dashboard; an explicit sign-out forgets the account so the next launch asks again. Password changes in the Profile page stay in sync with the encrypted copy. When no keychain is available the app offers to continue without staying signed in (Linux without a keyring gets a reduced-protection warning).
 - **Missing-tool warnings:** on startup it checks for Docker, Kubernetes access (`kubectl`), and the SSH key generator and names what each is needed for before the dashboard opens.
-- **Single instance + auto-update:** a second launch focuses the open window; packaged builds (except Store packages) update from GitHub releases via `electron-updater`.
+- **Single instance + auto-update:** a second launch focuses the open window; packaged builds (except Store packages) update from GitHub releases via `electron-updater`. When a newer release is found, a line at the bottom of the navigation shows it — selecting it installs the downloaded update, or opens the download location when it still has to be fetched.
 - **Log file:** GUI output persists to `<userData>/logs/gui-server.log`, since desktop apps have no visible console. An unexpected server stop shows the log path in an error dialog.
 
 Dev runs never touch the repo `.env`: the main process passes the stored account as the server's sign-in via the environment, on a free loopback port.

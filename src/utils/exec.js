@@ -8,7 +8,13 @@ import { spawn, spawnSync } from "node:child_process";
 export function dockerExec() {
   const overridden = Boolean(process.env.DOCKER_BIN);
   const cmd = process.env.DOCKER_BIN || "docker";
-  const opts = overridden && process.platform === "win32" ? { shell: true } : {};
+  // windowsHide keeps console tools (docker/kubectl/ssh-keygen) from
+  // flashing a terminal window when the parent has no console (notably the
+  // packaged desktop app). No-op on other platforms.
+  const opts = {
+    windowsHide: true,
+    ...(overridden && process.platform === "win32" ? { shell: true } : {}),
+  };
   return { cmd, opts };
 }
 
@@ -64,6 +70,7 @@ export function ensureDockerAvailable() {
  */
 export function exec(cmd, args = [], opts = {}) {
   const res = spawnSync(cmd, args, {
+    windowsHide: true,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...opts,
@@ -81,7 +88,7 @@ export function exec(cmd, args = [], opts = {}) {
  */
 export function run(cmd, args = [], opts = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: "inherit", ...opts });
+    const child = spawn(cmd, args, { windowsHide: true, stdio: "inherit", ...opts });
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve();
@@ -96,6 +103,7 @@ export function run(cmd, args = [], opts = {}) {
 export function runWithInput(cmd, args = [], input = "", opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
+      windowsHide: true,
       stdio: ["pipe", "inherit", "inherit"],
       ...opts,
     });
@@ -114,5 +122,5 @@ export function runWithInput(cmd, args = [], input = "", opts = {}) {
  * Spawn a long-running command, returning the child handle.
  */
 export function start(cmd, args = [], opts = {}) {
-  return spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], ...opts });
+  return spawn(cmd, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], ...opts });
 }

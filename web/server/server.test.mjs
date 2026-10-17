@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import {
   ALLOWED_OPS,
+  DESKTOP_SESSION_TTL_MS,
   REPO_ROOT,
+  SESSION_TTL_MS,
   buildJobArgv,
   buildStarterYaml,
   captureOutput,
@@ -15,6 +17,7 @@ import {
   findClaimedNodePorts,
   findTakenNodePorts,
   getEffectiveAuth,
+  isDesktopReq,
   isLoopbackReq,
   migrateLegacyToAuthFile,
   readAuthRecord,
@@ -981,4 +984,109 @@ test("auth store: legacy .env migrates to hash and strips plaintext", () => {
   assert.equal(record.email, "admin@example.com");
   assert.ok(verifyAuthPassword(record, "oldpass99"));
   assert.equal(getEffectiveAuth(env).type, "file");
+});
+
+test("http: browser sessions stay fixed at 12h and must sign in again", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-session-browser-"));
+  const env = {
+    adminEmail: "admin@example.com",
+    adminPassword: "s3cret99",
+    port: 0,
+    projectsFile: path.join(tmp, "projects.json"),
+    allowedOrigin: "",
+  };
+  const server = createServer(env);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const realNow = Date.now;
+  try {
+    const login = await fetch(`${base}/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "admin@example.com", password: "s3cret99" }),
+    });
+    assert.equal(login.status, 200);
+    const setCookie = login.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /gui_session=/);
+    assert.match(setCookie, new RegExp(`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`));
+    const cookie = setCookie.split(";")[0];
+    const t0 = realNow();
+
+    // No cookie refresh for browsers: expiry stays fixed from sign-in.
+    const me = await fetch(`${base}/api/me`, { headers: { cookie } });
+    assert.equal(me.status, 200);
+    assert.equal(me.headers.get("set-cookie") ?? "", "");
+
+    // Activity does not extend: 11h works, 13h past sign-in is expired.
+    Date.now = () => t0 + 11 * 3600 * 1000;
+    assert.equal((await fetch(`${base}/api/me`, { headers: { cookie } })).status, 200);
+    Date.now = () => t0 + 13 * 3600 * 1000;
+    assert.equal((await fetch(`${base}/api/me`, { headers: { cookie } })).status, 401);
+  } finally {
+    Date.now = realNow;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("http: desktop sessions slide with a 1y cookie and stay signed in", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gui-session-desktop-"));
+  const env = {
+    adminEmail: "admin@example.com",
+    adminPassword: "s3cret99",
+    port: 0,
+    projectsFile: path.join(tmp, "projects.json"),
+    allowedOrigin: "",
+  };
+  const server = createServer(env);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const realNow = Date.now;
+  const desktopHeaders = (cookie) => ({
+    cookie,
+    "x-esuyo-desktop": "1",
+  });
+  try {
+    const login = await fetch(`${base}/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-esuyo-desktop": "1" },
+      body: JSON.stringify({ email: "admin@example.com", password: "s3cret99" }),
+    });
+    assert.equal(login.status, 200);
+    const setCookie = login.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /gui_session=/);
+    assert.match(setCookie, new RegExp(`Max-Age=${Math.floor(DESKTOP_SESSION_TTL_MS / 1000)}`));
+    const cookie = setCookie.split(";")[0];
+    const t0 = realNow();
+
+    // Desktop responses refresh the long-lived cookie.
+    const me = await fetch(`${base}/api/me`, { headers: desktopHeaders(cookie) });
+    assert.equal(me.status, 200);
+    const refreshed = me.headers.get("set-cookie") ?? "";
+    assert.match(refreshed, /gui_session=/);
+    assert.match(refreshed, new RegExp(`Max-Age=${Math.floor(DESKTOP_SESSION_TTL_MS / 1000)}`));
+
+    // Sliding: 11h then 22h after sign-in (past the browser 12h expiry).
+    Date.now = () => t0 + 11 * 3600 * 1000;
+    assert.equal((await fetch(`${base}/api/me`, { headers: desktopHeaders(cookie) })).status, 200);
+    Date.now = () => t0 + 22 * 3600 * 1000;
+    assert.equal((await fetch(`${base}/api/me`, { headers: desktopHeaders(cookie) })).status, 200);
+
+    // A year of idleness finally expires.
+    Date.now = () => t0 + 400 * 24 * 3600 * 1000;
+    assert.equal((await fetch(`${base}/api/me`, { headers: desktopHeaders(cookie) })).status, 401);
+  } finally {
+    Date.now = realNow;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("isDesktopReq: desktop header only counts over loopback", () => {
+  const loopback = (headers) => ({ headers, socket: { remoteAddress: "127.0.0.1" } });
+  assert.equal(isDesktopReq(loopback({ "x-esuyo-desktop": "1" })), true);
+  assert.equal(isDesktopReq(loopback({ "x-esuyo-desktop": "true" })), true);
+  assert.equal(isDesktopReq(loopback({})), false);
+  assert.equal(
+    isDesktopReq({ headers: { "x-esuyo-desktop": "1" }, socket: { remoteAddress: "203.0.113.7" } }),
+    false
+  );
 });
