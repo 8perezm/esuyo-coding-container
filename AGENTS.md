@@ -1,5 +1,14 @@
 # Agent guidelines
 
+## Remotes and releases
+
+- Two remotes: `origin` (Azure DevOps) and `public` (GitHub).
+- Versioning happens in the `public` repo via a GitHub workflow: every push
+  to `public` `main` creates a new version (version-bump commit + tag).
+- Before pushing to `public`, always fetch `public` `main` first and merge it
+  in (e.g. `git fetch public main`, then merge). Pushing without pulling is
+  rejected, and the local `main` must end up containing the latest bump commit.
+
 - The web GUI serves GUI users, who are not CLI users: never mention the CLI
   in GUI-visible copy. No commands (`node src/index.js ...`, npm commands),
   no "CLI args" / "CLI-parity" notes, no command-line renderings of job
