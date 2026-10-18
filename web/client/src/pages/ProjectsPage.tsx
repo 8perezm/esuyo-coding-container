@@ -67,7 +67,19 @@ const JOB_NOTICE_TTL_MS = 20000;
 
 const SORT_KEY_STORAGE_KEY = 'projectsTableSortKey';
 const SORT_DIR_STORAGE_KEY = 'projectsTableSortDir';
+const FILTER_STORAGE_KEY = 'projectsTableStatusFilter';
 const SORT_KEYS: SortKey[] = ['name', 'status', 'image', 'namespace', 'nodePort'];
+const STATUS_FILTERS: StatusFilter[] = ['all', 'running', 'stopped'];
+
+function readStoredStatusFilter(): StatusFilter {
+  try {
+    const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    if (raw && (STATUS_FILTERS as string[]).includes(raw)) return raw as StatusFilter;
+  } catch {
+    /* storage unavailable — fall back to default */
+  }
+  return 'running';
+}
 
 function readStoredSortKey(): SortKey {
   try {
@@ -211,9 +223,17 @@ export function ProjectsPage() {
     [jobPendingKey],
   );
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStoredStatusFilter());
   const [sortKey, setSortKey] = useState<SortKey>(() => readStoredSortKey());
   const [sortDir, setSortDir] = useState<SortDir>(() => readStoredSortDir());
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FILTER_STORAGE_KEY, statusFilter);
+    } catch {
+      /* storage unavailable — filter just won't persist */
+    }
+  }, [statusFilter]);
 
   useEffect(() => {
     try {
