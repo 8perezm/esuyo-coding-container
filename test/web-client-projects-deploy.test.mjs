@@ -15,6 +15,7 @@ const projectsPath = path.join(root, 'web/client/src/pages/ProjectsPage.tsx');
 const overviewPath = path.join(root, 'web/client/src/pages/OverviewPage.tsx');
 const editPath = path.join(root, 'web/client/src/pages/ProjectEditPage.tsx');
 const deployTabPath = path.join(root, 'web/client/src/components/ProjectDeployTab.tsx');
+const refreshControlPath = path.join(root, 'web/client/src/components/RefreshControl.tsx');
 const appPath = path.join(root, 'web/client/src/App.tsx');
 const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.tsx');
 
@@ -23,6 +24,7 @@ const projects = await readFile(projectsPath, 'utf8');
 const overview = await readFile(overviewPath, 'utf8');
 const edit = await readFile(editPath, 'utf8');
 const deploy = await readFile(deployTabPath, 'utf8');
+const refreshControl = await readFile(refreshControlPath, 'utf8');
 const app = await readFile(appPath, 'utf8');
 const sidebar = await readFile(sidebarPath, 'utf8');
 
@@ -251,6 +253,62 @@ describe('OverviewPage projects table contract', () => {
     assert.ok(
       overview.indexOf('page-overview-action-terminal') < overview.indexOf('page-overview-action-delete'),
       'terminal action must sit left of the delete button',
+    );
+  });
+});
+
+describe('OverviewPage refresh control contract', () => {
+  it('replaces the lone refresh button with a Refresh + interval control', () => {
+    assert.ok(
+      overview.includes("from '../components/RefreshControl'"),
+      'overview must use the shared RefreshControl',
+    );
+    assert.ok(overview.includes('<RefreshControl'), 'dashboard header must render the RefreshControl');
+    assert.ok(!overview.includes('RefreshCw'), 'overview must not render its own refresh icon');
+    assert.ok(
+      refreshControl.includes('data-ref="page-overview-refresh"'),
+      'control must keep the manual refresh ref',
+    );
+    assert.ok(refreshControl.includes('Refreshing…'), 'manual button must show the refreshing state');
+  });
+
+  it('offers Off/5s/10s/15s/30s/1m intervals defaulting to 15s and persisting the choice', () => {
+    assert.ok(overview.includes('overviewRefreshInterval'), 'missing persisted interval key');
+    assert.match(overview, /readStoredRefreshInterval/);
+    assert.ok(
+      overview.includes('DEFAULT_REFRESH_INTERVAL_SECONDS = 15'),
+      'interval fallback must default to 15s',
+    );
+    assert.ok(
+      overview.includes('useState<number>(readStoredRefreshInterval)'),
+      'interval must init from storage',
+    );
+    assert.ok(
+      overview.includes('raw === null'),
+      'missing/blank stored interval must fall back to the default, not Off',
+    );
+    for (const label of ['Off', '5s', '10s', '15s', '30s', '1m']) {
+      assert.ok(refreshControl.includes(label), `interval menu must offer ${label}`);
+    }
+    assert.ok(refreshControl.includes('role="menu"'), 'interval picker must use a menu');
+    assert.ok(refreshControl.includes('menuitemradio'), 'interval options must be menu item radios');
+    assert.ok(refreshControl.includes('aria-expanded'), 'interval button must expose its open state');
+    assert.ok(refreshControl.includes('ChevronDown'), 'interval button must use the chevron icon');
+  });
+
+  it('drives the dashboard polling cadence and stops it when Off', () => {
+    assert.ok(!overview.includes(', 15000)'), 'hardcoded 15s poll must be gone');
+    assert.ok(
+      overview.includes('refreshIntervalSeconds * 1000'),
+      'background refresh must follow the picked interval',
+    );
+    assert.ok(
+      overview.includes('if (refreshIntervalSeconds <= 0) return'),
+      'Off must disable background refresh',
+    );
+    assert.ok(
+      overview.includes('onIntervalChange={handleRefreshIntervalChange}'),
+      'interval picks must reach the dashboard state',
     );
   });
 });

@@ -673,6 +673,24 @@ a {
   background-color: var(--bg-row-hover);
 }
 
+/* ---- Refresh control (Dashboard header: manual refresh + interval picker) ---- */
+.refresh-control-segment:hover {
+  filter: brightness(0.95);
+}
+
+.refresh-control-segment:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+
+.refresh-control-segment:disabled {
+  cursor: not-allowed;
+}
+
+.refresh-control-option:hover {
+  background-color: var(--bg-row-hover);
+}
+
 /* ---- Frameless desktop window controls (Electron only) ---- */
 .window-controls {
   display: flex;
