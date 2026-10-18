@@ -27,6 +27,27 @@ interface ConfigResponse {
   configPath?: string;
 }
 
+interface ConfigMerged {
+  image?: { registry?: string; name?: string; tag?: string };
+  k8s?: { namespace?: string; nodePort?: number };
+}
+
+interface WorkloadEntry {
+  projectId?: string | null;
+  deployed: boolean;
+  image?: string | null;
+}
+
+interface WorkloadsResponse {
+  ok: boolean;
+  workloads?: WorkloadEntry[];
+}
+
+function asMerged(value: unknown): ConfigMerged | null {
+  if (typeof value !== 'object' || value === null) return null;
+  return value as ConfigMerged;
+}
+
 interface StarterResponse {
   yaml: string;
   slug: string;
@@ -49,6 +70,8 @@ export function ProjectEditPage() {
   const [yaml, setYaml] = useState('');
   const [resolvedPath, setResolvedPath] = useState<string | null>(null);
   const [configMissing, setConfigMissing] = useState(false);
+  const [merged, setMerged] = useState<ConfigMerged | null>(null);
+  const [workloadImage, setWorkloadImage] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -89,12 +112,15 @@ export function ProjectEditPage() {
     setConfigError(null);
     setConfigOk(null);
     setConfigMissing(false);
+    setMerged(null);
+    setWorkloadImage(null);
     api
       .get<ConfigResponse>(`/api/config?projectId=${encodeURIComponent(project.id)}`)
       .then((data) => {
         if (cancelled) return;
         setYaml(data.rawYaml ?? '');
         setResolvedPath(data.configPath ?? project.configPath);
+        setMerged(asMerged(data.merged));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -103,10 +129,32 @@ export function ProjectEditPage() {
         const msg = errMsg(err);
         setYaml('');
         setResolvedPath(project.configPath);
+        setMerged(null);
         setConfigMissing(true);
         if (!/config file not found|cannot read config file|ENOENT|no such file/i.test(msg)) {
           setConfigError(`Could not load config (${msg}).`);
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cluster-resolved image (registry/name:tag) for this project, preferred
+  // over the saved config below — saved configs often leave the tag floating
+  // on the cluster.
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    api
+      .get<WorkloadsResponse>('/api/cluster/workloads')
+      .then((data) => {
+        if (cancelled) return;
+        const entry = (data.workloads ?? []).find((w) => w.projectId === project.id) ?? null;
+        setWorkloadImage(entry?.image ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkloadImage(null);
       });
     return () => {
       cancelled = true;
@@ -252,6 +300,13 @@ export function ProjectEditPage() {
     }
   }
 
+  const configImage = merged
+    ? `${[merged.image?.registry, merged.image?.name].filter(Boolean).join('/') || '—'}${merged.image?.tag ? `:${merged.image.tag}` : ''}`
+    : '…';
+  // Prefer the cluster-resolved image: saved configs often leave the tag
+  // floating on the cluster.
+  const imageDisplay = workloadImage ?? configImage;
+
   return (
     <div data-ref="page-project-edit">
       <PageHeader
@@ -345,6 +400,12 @@ export function ProjectEditPage() {
                 <p style={{ margin: '8px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }} data-ref="page-project-edit-config-path-hint">
                   Renaming moves the file when it lives in the managed system folder. Custom paths stay put.
                 </p>
+              </div>
+              <div data-ref="page-project-edit-image-wrap">
+                <span style={{ display: 'block', fontSize: 'var(--font-size-md)', fontWeight: 600, marginBottom: 4 }}>Image</span>
+                <code data-ref="page-project-edit-image" style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-sm)', overflowWrap: 'anywhere' }}>
+                  {imageDisplay}
+                </code>
               </div>
               <div>
                 <Button type="submit" disabled={savingSettings} data-ref="page-project-edit-settings-save">

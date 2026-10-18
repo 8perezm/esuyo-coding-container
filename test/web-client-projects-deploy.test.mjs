@@ -62,11 +62,14 @@ describe('ProjectsPage contract', () => {
     assert.match(projects, /useProjects/);
   });
 
-  it('renders active/inactive tables with Name, Image, Namespace, NodePort, Actions and no config paths', () => {
+  it('renders tables with Name, Status, Namespace, NodePort and no Image column', () => {
     assert.match(projects, /<Table/);
-    for (const col of ['Name', 'Image', 'Namespace', 'NodePort', 'Actions']) {
+    for (const col of ['Name', 'Status', 'Namespace', 'NodePort']) {
       assert.ok(projects.includes(col), `missing column ${col}`);
     }
+    assert.ok(!projects.includes('>Actions<'), 'Actions header label must be removed');
+    assert.ok(!projects.includes("'Image'"), 'Image column must be removed');
+    assert.ok(!projects.includes('page-projects-sort-image'), 'Image sort must be removed');
     assert.ok(!projects.includes('<TH>Mode</TH>'), 'Mode column must be removed');
     assert.ok(!projects.includes('Config path'), 'config paths must not be shown in tables');
     assert.ok(!projects.includes('page-projects-active-card'), 'active detail card must be removed');
@@ -75,10 +78,10 @@ describe('ProjectsPage contract', () => {
     }
   });
 
-  it('prefers the cluster-resolved image (with version) from workloads over the saved config', () => {
+  it('loads workloads only for deployed status (image lives on the edit page)', () => {
     assert.ok(projects.includes('/api/cluster/workloads'), 'must load workloads status');
-    assert.ok(projects.includes('workloadImages'), 'must map workload images by project');
-    assert.ok(projects.includes('imageDisplay'), 'row must render the resolved image with version');
+    assert.ok(!projects.includes('workloadImages'), 'must not map workload images by project');
+    assert.ok(!projects.includes('imageDisplay'), 'row must not render the image');
   });
 
   it('shows Running/Stopped status badges and no Active badge', () => {
@@ -117,11 +120,15 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('No projects yet'), 'missing empty state copy');
   });
 
-  it('fetches GET /api/config per project and shows mode/image/namespace/nodePort', () => {
+  it('fetches GET /api/config per project and shows namespace/nodePort', () => {
     assert.match(projects, /\/api\/config\?projectId=/);
-    for (const field of ['nodePort', 'namespace', 'registry']) {
+    for (const field of ['nodePort', 'namespace']) {
       assert.ok(projects.includes(field), `missing config field ${field}`);
     }
+  });
+
+  it('right-aligns the row action buttons', () => {
+    assert.ok(projects.includes("justifyContent: 'flex-end'"), 'actions container must be right-aligned');
   });
 
   it('offers Create/Deploy/Delete quick actions via POST /api/jobs with projectId', () => {
@@ -206,6 +213,16 @@ describe('ProjectEditPage deploy tab contract', () => {
     assert.ok(edit.includes('<ProjectDeployTab project={project}'), 'deploy tab must render for the edited project');
     assert.ok(edit.includes('page-project-edit-tab-deploy'), 'missing deploy tab ref');
     assert.ok(edit.includes('page-project-edit-panel-deploy'), 'missing deploy panel ref');
+  });
+
+  it('shows the image value on the settings tab', () => {
+    assert.ok(edit.includes('page-project-edit-image'), 'missing edit page image value');
+    assert.ok(edit.includes('/api/cluster/workloads'), 'must load workloads for the cluster-resolved image');
+    assert.ok(edit.includes('imageDisplay'), 'must render the resolved image value');
+    assert.ok(
+      edit.indexOf('workloadImage ?? configImage') !== -1,
+      'must prefer the cluster-resolved image over the saved config',
+    );
   });
 });
 

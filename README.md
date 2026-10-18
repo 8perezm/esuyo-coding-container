@@ -10,6 +10,17 @@ Work your way: the terminal workflow, a browser admin UI (dashboard, project edi
 
 For private, internal Kubernetes clusters only. Do not expose to the public web. Every project opens NodePorts on all cluster nodes (SSH plus optional web/sidecar ports) and serves Ingress hosts without authentication or TLS by default. Only run this on a trusted internal network (homelab, LAN, or VPN-gated cluster) behind a firewall. See [Architecture](./docs/architecture.md#security-notes) for details.
 
+<table>
+  <tr>
+    <td><img src="./assets/coding-containers-1.png" alt="Dashboard" /></td>
+    <td><img src="./assets/coding-containers-terminal.png" alt="Browser terminal" /></td>
+  </tr>
+  <tr>
+    <td><img src="./assets/coding-containers-images.png" alt="Shared images" /></td>
+    <td><img src="./assets/coding-containers-ssh.png" alt="SSH and keys" /></td>
+  </tr>
+</table>
+
 ## Features
 
 - One deploy for a ready-to-code container, SSH in, and tear down when done

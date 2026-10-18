@@ -38,7 +38,6 @@ interface ConfigResponse {
 interface WorkloadStatus {
   projectId?: string | null;
   deployed: boolean;
-  image?: string | null;
 }
 
 interface WorkloadsResponse {
@@ -60,7 +59,7 @@ function errMsg(err: unknown): string {
 type LifecycleOp = 'create' | 'deploy' | 'delete';
 
 type StatusFilter = 'all' | 'running' | 'stopped';
-type SortKey = 'name' | 'status' | 'image' | 'namespace' | 'nodePort';
+type SortKey = 'name' | 'status' | 'namespace' | 'nodePort';
 type SortDir = 'asc' | 'desc';
 
 const JOB_NOTICE_TTL_MS = 20000;
@@ -68,7 +67,7 @@ const JOB_NOTICE_TTL_MS = 20000;
 const SORT_KEY_STORAGE_KEY = 'projectsTableSortKey';
 const SORT_DIR_STORAGE_KEY = 'projectsTableSortDir';
 const FILTER_STORAGE_KEY = 'projectsTableStatusFilter';
-const SORT_KEYS: SortKey[] = ['name', 'status', 'image', 'namespace', 'nodePort'];
+const SORT_KEYS: SortKey[] = ['name', 'status', 'namespace', 'nodePort'];
 const STATUS_FILTERS: StatusFilter[] = ['all', 'running', 'stopped'];
 
 function readStoredStatusFilter(): StatusFilter {
@@ -110,7 +109,6 @@ export function ProjectsPage() {
   const [jobNotices, setJobNotices] = useState<Record<string, JobResponse & { noticedAt: number }>>({});
   const [jobPendingKey, setJobPendingKey] = useState<string | null>(null);
   const [deployedIds, setDeployedIds] = useState<Set<string> | null>(null);
-  const [workloadImages, setWorkloadImages] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -123,11 +121,6 @@ export function ProjectsPage() {
           setDeployedIds(
             new Set(workloads.filter((w) => w.deployed && w.projectId).map((w) => w.projectId as string)),
           );
-          const images: Record<string, string> = {};
-          for (const w of workloads) {
-            if (w.projectId && w.image) images[w.projectId] = w.image;
-          }
-          setWorkloadImages(images);
         })
         .catch(() => {
           if (!cancelled) setDeployedIds(new Set());
@@ -283,14 +276,6 @@ export function ProjectsPage() {
       return statusFilter === 'running' ? isDeployed : !isDeployed;
     });
 
-    const imageFor = (p: Project): string => {
-      const config = configs[p.id] ?? null;
-      const image = config?.merged.image;
-      const imageText = config
-        ? `${[image?.registry, image?.name].filter(Boolean).join('/') || '—'}${image?.tag ? `:${image.tag}` : ''}`
-        : '…';
-      return workloadImages[p.id] ?? imageText;
-    };
     const namespaceFor = (p: Project): string => configs[p.id]?.merged.k8s?.namespace ?? '';
     const nodePortFor = (p: Project): number | null => configs[p.id]?.merged.k8s?.nodePort ?? null;
     const statusFor = (p: Project): string => (deployedIds?.has(p.id) ? 'running' : 'stopped');
@@ -304,8 +289,6 @@ export function ProjectsPage() {
           const cmp = statusFor(a).localeCompare(statusFor(b));
           return (cmp !== 0 ? cmp : a.name.localeCompare(b.name)) * dir;
         }
-        case 'image':
-          return imageFor(a).localeCompare(imageFor(b)) * dir;
         case 'namespace':
           return namespaceFor(a).localeCompare(namespaceFor(b)) * dir;
         case 'nodePort': {
@@ -320,7 +303,7 @@ export function ProjectsPage() {
           return 0;
       }
     });
-  }, [projects, configs, deployedIds, workloadImages, statusFilter, sortKey, sortDir]);
+  }, [projects, configs, deployedIds, statusFilter, sortKey, sortDir]);
 
   const renderWorkloadsLoading = (ref: string) => (
     <div
@@ -338,24 +321,16 @@ export function ProjectsPage() {
   const renderProjectRow = (p: Project) => {
     const isDeployed = deployedIds?.has(p.id) ?? false;
     const config = configs[p.id] ?? null;
-    const image = config?.merged.image;
     const k8s = config?.merged.k8s;
-    const imageText = config
-      ? `${[image?.registry, image?.name].filter(Boolean).join('/') || '—'}${image?.tag ? `:${image.tag}` : ''}`
-      : '…';
-    // Prefer the cluster-resolved image (registry/name:tag) from workloads —
-    // saved configs often leave the tag floating on the cluster.
-    const imageDisplay = workloadImages[p.id] ?? imageText;
     const notice = jobNotices[p.id] ?? null;
     return (
       <TR key={p.id}>
         <TD>{p.name}</TD>
         <TD>{isDeployed ? <Badge tone="accent">Running</Badge> : <Badge>Stopped</Badge>}</TD>
-        <TD style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-md)' }}>{imageDisplay}</TD>
         <TD>{config ? (k8s?.namespace ?? '—') : '…'}</TD>
         <TD>{config ? (k8s?.nodePort ?? '—') : '…'}</TD>
         <TD>
-          <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {!isDeployed && (
               <Button
                 variant="secondary"
@@ -453,10 +428,9 @@ export function ProjectsPage() {
           <TR>
             {renderSortableHeader('Name', 'name', 'page-projects-sort-name')}
             {renderSortableHeader('Status', 'status', 'page-projects-sort-status')}
-            {renderSortableHeader('Image', 'image', 'page-projects-sort-image')}
             {renderSortableHeader('Namespace', 'namespace', 'page-projects-sort-namespace')}
             {renderSortableHeader('NodePort', 'nodePort', 'page-projects-sort-nodeport')}
-            <TH>Actions</TH>
+            <TH style={{ textAlign: 'right' }} aria-label="Row actions" />
           </TR>
         </THead>
         <TBody>{list.map(renderProjectRow)}</TBody>
