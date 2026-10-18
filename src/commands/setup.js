@@ -5,7 +5,7 @@ import { globalConfigDir, globalConfigPath, PROJECT_ROOT } from "../config.js";
 import { ensureKeyPair } from "../utils/keys.js";
 import { exec, run } from "../utils/exec.js";
 import { kubectlExec } from "../utils/system-config.js";
-import { NAMESPACE_LABEL, SETUP_ANNOTATIONS, readNamespaceSetupValues } from "../utils/namespaces.js";
+import { NAMESPACE_LABEL, SETUP_ANNOTATIONS, readNamespaceSetupValues, readDeploymentSetupValues } from "../utils/namespaces.js";
 
 // Values that differ per environment. When neither a flag nor a prompt supplies
 // one, the generated config gets a clearly-marked placeholder instead of a guess.
@@ -272,14 +272,24 @@ export async function setup(opts = {}) {
   } else {
     // Existing-namespace flow: the GUI hides registry/NFS and sends only
     // --namespace. Fill blanks from the namespace's stored annotations so
-    // a reselect needs no retyping. Missing/offline degrades to the normal
-    // prompt-or-placeholder path below.
+    // a reselect needs no retyping. Legacy namespaces created before the
+    // annotations existed carry no stored values, so fall back to the live
+    // workloads (deployment NFS volume + image registry). Missing/offline
+    // degrades to the normal prompt-or-placeholder path below.
     const effective = { ...opts };
     if (typeof effective.namespace === "string" && effective.namespace.trim()) {
       try {
-        const stored = readNamespaceSetupValues(normalizeNamespace(effective.namespace));
+        const ns = normalizeNamespace(effective.namespace);
+        const stored = readNamespaceSetupValues(ns);
         for (const field of ["registry", "nfsServer", "nfsBasePath"]) {
           if (!effective[field] && stored[field]) effective[field] = stored[field];
+        }
+        const missing = ["registry", "nfsServer", "nfsBasePath"].some((f) => !effective[f]);
+        if (missing) {
+          const inferred = readDeploymentSetupValues(ns);
+          for (const field of ["registry", "nfsServer", "nfsBasePath"]) {
+            if (!effective[field] && inferred[field]) effective[field] = inferred[field];
+          }
         }
       } catch {
         /* invalid name surfaces via captureEnvironment validation */

@@ -64,7 +64,13 @@ export async function systemInit(cfg, { tag, keep = 10 } = {}) {
   } catch (err) {
     if (!/not found/i.test(err.message)) throw err;
   }
-  await ensureNamespace(ns);
+  await ensureNamespace(ns, {
+    setupValues: {
+      registry: cfg.image?.registry,
+      nfsServer: cfg.nfs?.server,
+      nfsBasePath: cfg.nfs?.basePath,
+    },
+  });
   await patchSystemConfig(ns, { current: tag, previous: undefined, maxEver: tag, keep });
   console.log(
     `Created ${SYSTEM_CM_NAME} in namespace ${ns}: current=${tag} maxEver=${tag} keep=${keep}`

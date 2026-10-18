@@ -125,6 +125,18 @@ export function SetupPage() {
   const newNamespaceInvalid =
     mode === 'new' && newNamespace.trim() !== '' && !isValidNamespaceName(newNamespace);
   const effectiveNamespace = mode === 'existing' ? selectedName : newNamespace.trim();
+  // Stored prefill for the selected area. Legacy areas created before the
+  // annotation feature carry no stored values; the form then shows manual
+  // inputs so nothing is silently left blank (the server also falls back to
+  // the area's live workloads on submit).
+  const existingPrefillComplete =
+    mode === 'existing' &&
+    canPickExisting &&
+    Boolean(selectedEntry) &&
+    Boolean(mergeSetupPrefill(selectedEntry?.setupValues, globalFallback).registry.trim()) &&
+    Boolean(mergeSetupPrefill(selectedEntry?.setupValues, globalFallback).nfsServer.trim()) &&
+    Boolean(mergeSetupPrefill(selectedEntry?.setupValues, globalFallback).nfsBasePath.trim());
+  const hideExistingInputs = mode === 'existing' && canPickExisting && existingPrefillComplete;
 
   const chooseExisting = useCallback(
     (name: string) => {
@@ -174,11 +186,13 @@ export function SetupPage() {
       }
       setPending(true);
       try {
-        // Existing-namespace flow: send only the namespace. The server
-        // fills registry/NFS from the namespace's stored values.
+        // Existing-namespace flow: send the namespace plus any visible field
+        // values. The server fills remaining blanks from the namespace's
+        // stored values, falling back to its live workloads, so a reselect
+        // needs no retyping while manual entries still reach the backend.
         const args =
           mode === 'existing'
-            ? buildSetupArgs('', '', '', selectedName)
+            ? buildSetupArgs(registry, nfsServer, nfsBasePath, selectedName)
             : buildSetupArgs(registry, nfsServer, nfsBasePath, effectiveNamespace);
         const job = await api.post<JobResponse>('/api/jobs', { op: 'setup', args });
         setResult(job);
@@ -233,9 +247,11 @@ export function SetupPage() {
         </h2>
         <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 'var(--font-size-md)' }}>
           Never overwrites existing files.{' '}
-          {mode === 'existing' && canPickExisting
+          {hideExistingInputs
             ? 'Uses the stored values for the selected area.'
-            : 'All fields are required to create a new area.'}
+            : mode === 'existing' && canPickExisting
+              ? 'No stored values for this area yet — fill in the blanks, or leave them empty to auto-fill from its existing workloads.'
+              : 'All fields are required to create a new area.'}
         </p>
         <form data-ref="page-setup-form" onSubmit={(e) => void submit(e)}>
           <div style={{ marginBottom: 16 }}>
@@ -328,10 +344,10 @@ export function SetupPage() {
               One name per developer keeps work private; one shared name lets a team float together.
             </p>
           </div>
-          {mode === 'existing' && canPickExisting ? null : (
+          {hideExistingInputs ? null : (
           <div style={{ display: 'grid', gap: 12, maxWidth: 520, marginBottom: 16 }}>
             <div>
-              <Label htmlFor="setup-registry">Container registry (required)</Label>
+              <Label htmlFor="setup-registry">Container registry{mode === 'new' ? ' (required)' : ''}</Label>
               <Input
                 data-ref="page-setup-registry-input"
                 id="setup-registry"
@@ -343,11 +359,11 @@ export function SetupPage() {
                 placeholder="registry.example.com/you"
                 autoComplete="off"
                 spellCheck={false}
-                required
+                required={mode === 'new'}
               />
             </div>
             <div>
-              <Label htmlFor="setup-nfs-server">NFS server (required)</Label>
+              <Label htmlFor="setup-nfs-server">NFS server{mode === 'new' ? ' (required)' : ''}</Label>
               <Input
                 data-ref="page-setup-nfs-server-input"
                 id="setup-nfs-server"
@@ -359,11 +375,11 @@ export function SetupPage() {
                 placeholder="10.0.0.5"
                 autoComplete="off"
                 spellCheck={false}
-                required
+                required={mode === 'new'}
               />
             </div>
             <div>
-              <Label htmlFor="setup-nfs-base-path">NFS base path (required)</Label>
+              <Label htmlFor="setup-nfs-base-path">NFS base path{mode === 'new' ? ' (required)' : ''}</Label>
               <Input
                 data-ref="page-setup-nfs-base-path-input"
                 id="setup-nfs-base-path"
@@ -375,7 +391,7 @@ export function SetupPage() {
                 placeholder="/workspaces"
                 autoComplete="off"
                 spellCheck={false}
-                required
+                required={mode === 'new'}
               />
             </div>
           </div>

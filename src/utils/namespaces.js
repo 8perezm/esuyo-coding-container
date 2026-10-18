@@ -108,6 +108,116 @@ export function getNamespaces() {
 }
 
 /**
+ * Extract the setup registry (everything before the image name) from a
+ * container image reference. Strips tag/digest first, then drops the last
+ * path segment (the image name):
+ *   "registry.example.com/you/coding-container:v1.0.0" -> "registry.example.com/you"
+ *   "10.0.0.5:5000/coding-container:v1.0.0"            -> "10.0.0.5:5000"
+ * Returns "" when there is no registry prefix to infer.
+ */
+export function registryFromImage(image) {
+  const raw = String(image ?? "").trim();
+  if (!raw) return "";
+  let s = raw.split("@")[0];
+  const lastSlash = s.lastIndexOf("/");
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon > lastSlash) s = s.slice(0, lastColon);
+  const slash = s.lastIndexOf("/");
+  if (slash <= 0) return "";
+  return s.slice(0, slash).trim();
+}
+
+/**
+ * Placeholder values that must never count as live cluster state. Mirrors
+ * PLACEHOLDERS in src/commands/setup.js (kept local to avoid a cycle:
+ * setup.js imports this module). A broken deploy written from placeholders
+ * (e.g. the legacy `wicked` case) must not poison inference for the rest.
+ */
+const PLACEHOLDER_VALUES = new Set([
+  "your-registry.example.com/you",
+  "your-nas-ip-or-hostname",
+  "/path/to/shared/workspaces",
+]);
+
+function isUsableSetupValue(v) {
+  if (typeof v !== "string") return false;
+  const t = v.trim();
+  return Boolean(t) && !PLACEHOLDER_VALUES.has(t);
+}
+
+/**
+ * Pure extraction of setup values from `kubectl get deploy -n <ns> -o json`.
+ * Reads the NFS volume (`volumes[].nfs.{server,path}`) and the container
+ * image registry across all workloads and returns the most common value
+ * per field (majority vote), so one broken deploy written from placeholders
+ * cannot override the healthy majority. Placeholders and blanks are ignored.
+ * Accepts an already-parsed object or a raw JSON string; anything
+ * unparseable or wrongly shaped degrades to {}.
+ */
+export function parseDeploymentSetupValues(deployJson) {
+  let parsed = deployJson;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.items)) return {};
+  const votes = { registry: new Map(), nfsServer: new Map(), nfsBasePath: new Map() };
+  const vote = (field, value) => {
+    if (!isUsableSetupValue(value)) return;
+    const t = value.trim();
+    votes[field].set(t, (votes[field].get(t) ?? 0) + 1);
+  };
+  for (const item of parsed.items) {
+    const podSpec = item?.spec?.template?.spec;
+    if (!podSpec || typeof podSpec !== "object") continue;
+    const volumes = Array.isArray(podSpec.volumes) ? podSpec.volumes : [];
+    for (const vol of volumes) {
+      const nfs = vol?.nfs;
+      if (!nfs || typeof nfs !== "object") continue;
+      vote("nfsServer", nfs.server);
+      let basePath = typeof nfs.path === "string" ? nfs.path.trim() : "";
+      if (basePath) basePath = basePath.replace(/\/+$/, "") || "/";
+      vote("nfsBasePath", basePath);
+    }
+    const containers = Array.isArray(podSpec.containers) ? podSpec.containers : [];
+    for (const c of containers) vote("registry", registryFromImage(c?.image));
+  }
+  const out = {};
+  for (const [field, counts] of Object.entries(votes)) {
+    let best = "";
+    let bestN = 0;
+    for (const [value, n] of counts) {
+      if (n > bestN) {
+        best = value;
+        bestN = n;
+      }
+    }
+    if (best) out[field] = best;
+  }
+  return out;
+}
+
+/**
+ * Best-effort read of one namespace's live workload values (deployments).
+ * Returns {} when the namespace has no deployments, is unreachable, or
+ * carries no NFS/image info. Never throws, so `setup` stays usable offline.
+ */
+export function readDeploymentSetupValues(ns) {
+  const name = String(ns ?? "").trim();
+  if (!name) return {};
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    const out = exec(cmd, [...args, "get", "deploy", "-n", name, "-o", "json"], opts);
+    return parseDeploymentSetupValues(out);
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Best-effort read of one namespace's stored setup values (annotations).
  * Returns {} when the namespace is missing, unreachable, or has no
  * annotations. Never throws, so `setup` stays usable offline.
