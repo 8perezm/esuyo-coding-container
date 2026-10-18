@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Input, Label } from '../components/ui';
+import { WindowControls } from '../components/layout/WindowControls';
+import { isDesktopApp } from '../lib/desktop';
 
 export function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -32,6 +34,16 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ registered: boolean; canRegister: boolean } | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  // Desktop-only: the frameless Electron window has no native title bar, so
+  // the sign-in view needs the same minimize / maximize / close buttons as
+  // the main header (the preload script exposes window.desktop).
+  const [showWindowControls, setShowWindowControls] = useState(false);
+
+  useEffect(() => {
+    const desktop = isDesktopApp();
+    setShowWindowControls(desktop);
+    if (desktop) document.documentElement.classList.add('electron');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,9 +105,15 @@ export function LoginPage() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 16,
+        paddingTop: showWindowControls ? 76 : 16,
         backgroundColor: 'var(--bg-surface)',
       }}
     >
+      {showWindowControls ? (
+        <div className="login-titlebar" data-ref="login-titlebar">
+          <WindowControls />
+        </div>
+      ) : null}
       <Card style={{ width: '100%', maxWidth: 400 }} data-ref="login-card">
         <p className="brand" style={{ marginBottom: 4 }} data-ref="login-brand">
           Coding Containers

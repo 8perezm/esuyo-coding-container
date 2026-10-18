@@ -304,12 +304,12 @@ export function SetupPage() {
                     </option>
                   ))}
                 </select>
-                {selectedEntry ? (
+                {selectedEntry?.initialized ? (
                   <Badge
                     data-ref="page-setup-namespace-status"
-                    tone={selectedEntry.initialized ? 'accent' : 'default'}
+                    tone="accent"
                   >
-                    {selectedEntry.initialized ? 'ready' : 'empty'}
+                    ready
                   </Badge>
                 ) : null}
               </div>
