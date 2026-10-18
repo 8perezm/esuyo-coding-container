@@ -31,7 +31,7 @@ Without a built client, `/` answers `{"message":"GUI not built"}`. Sign-in uses 
 - **Images:** global vs. custom image repos, publishing new versions and pruning old tags as tracked jobs.
 - **System:** the shared-image pointer (`current`/`previous`/`maxEver`/`keep`), the resolved global image, registry tags, and the global config editor.
 - **SSH & Keys:** the registered connection aliases (same ordering as the terminal `list`), key rotation, and per-project key/image details.
-- **Setup:** first-time global setup (registry, file server, workspace path) as a tracked job, plus the current global config.
+- **Setup:** first-time global setup (registry, file server, workspace path) as a tracked job, plus the current global config. It lists existing coding areas (one per developer or one shared per team by convention, labeled `coding-container=true`) and prefills the form from each area's stored annotations, with manual entry when the cluster is unreachable.
 - **Jobs:** history of every operation (latest 50, newest first) with live log output and exit status.
 - **Profile:** signed-in account, password change, sign-out.
 

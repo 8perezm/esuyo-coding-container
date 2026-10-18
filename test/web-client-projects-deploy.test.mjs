@@ -99,6 +99,16 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('Add project'), 'missing add-project affordance');
   });
 
+  it('defaults the status filter to running and persists the selection', () => {
+    assert.ok(projects.includes('projectsTableStatusFilter'), 'missing persisted filter key');
+    assert.match(projects, /readStoredStatusFilter/);
+    assert.ok(
+      projects.includes('useState<StatusFilter>(() => readStoredStatusFilter())'),
+      'status filter must init from storage (default running)',
+    );
+    assert.ok(projects.includes("return 'running'"), 'stored-filter fallback must default to running');
+  });
+
   it('shows an EmptyState when there are no projects and a Spinner while loading', () => {
     assert.match(projects, /EmptyState/);
     assert.match(projects, /Spinner/);

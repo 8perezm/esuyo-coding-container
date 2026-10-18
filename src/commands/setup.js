@@ -3,14 +3,73 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { globalConfigDir, globalConfigPath, PROJECT_ROOT } from "../config.js";
 import { ensureKeyPair } from "../utils/keys.js";
+import { exec, run } from "../utils/exec.js";
+import { kubectlExec } from "../utils/system-config.js";
+import { NAMESPACE_LABEL, SETUP_ANNOTATIONS, readNamespaceSetupValues, readDeploymentSetupValues } from "../utils/namespaces.js";
 
 // Values that differ per environment. When neither a flag nor a prompt supplies
 // one, the generated config gets a clearly-marked placeholder instead of a guess.
-const PLACEHOLDERS = {
+export const PLACEHOLDERS = {
   registry: "your-registry.example.com/you",
   nfsServer: "your-nas-ip-or-hostname",
   nfsBasePath: "/path/to/shared/workspaces",
+  namespace: "coding",
 };
+
+// Same DNS-1123 pattern as defaultNamespace() in src/utils/instance.js:
+// lowercase alphanumerics and '-', max 63 chars.
+const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+
+export function normalizeNamespace(value) {
+  const v = String(value ?? "").trim();
+  if (v.length < 1 || v.length > 63 || !NAMESPACE_RE.test(v)) {
+    throw new Error(
+      `namespace must be a valid k8s name (lowercase alphanumerics and '-', max 63 chars), got: ${JSON.stringify(value)}`
+    );
+  }
+  return v;
+}
+
+/**
+ * Which of the three setup-value annotations to (re)write. Skips blanks
+ * and the setup placeholders so a never-configured environment never
+ * pollutes cluster annotations with "your-registry.example.com/you".
+ */
+export function setupAnnotationPairs(setupValues) {
+  const skip = new Set(Object.values(PLACEHOLDERS));
+  const pairs = [];
+  if (!setupValues || typeof setupValues !== "object") return pairs;
+  for (const [field, key] of Object.entries(SETUP_ANNOTATIONS)) {
+    const v = setupValues[field];
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (!t || skip.has(t)) continue;
+    pairs.push(`${key}=${t}`);
+  }
+  return pairs;
+}
+
+/**
+ * Label + annotate an existing namespace; best effort, never throws.
+ * Only touches a namespace that already exists (creation happens on
+ * deploy/init), so setup stays fully usable offline.
+ */
+async function tagNamespaceBestEffort(ns, setupValues) {
+  try {
+    const { cmd, args, opts } = kubectlExec();
+    exec(cmd, [...args, "get", "namespace", ns], opts);
+    await run(cmd, [...args, "label", "namespace", ns, NAMESPACE_LABEL, "--overwrite"], opts);
+    const pairs = setupAnnotationPairs(setupValues);
+    if (pairs.length) {
+      await run(cmd, [...args, "annotate", "namespace", ns, "--overwrite", ...pairs], opts);
+    }
+  } catch (err) {
+    console.warn(
+      `warning: could not tag namespace "${ns}" (it will be tagged on the next deploy): ` +
+        String(err.message ?? err).split("\n")[0]
+    );
+  }
+}
 
 // Emit a YAML double-quoted scalar so special characters (":", "/", etc.) are safe.
 function yamlValue(v) {
@@ -48,7 +107,7 @@ image:
     EXTRA_NPM_PACKAGES: ""
 
 k8s:
-  namespace: coding
+  namespace: ${yamlValue(values.namespace)}
   replicas: 1
   serviceType: NodePort
   nodePort: 30022   # default; override per project if several run at once
@@ -92,13 +151,29 @@ container:
 
 // Copy the Dockerfile from the repo into the global folder (the build context)
 // and add a .dockerignore so the SSH keys / this config never enter the build
-// context. Existing files are never overwritten.
+// context. Existing files are never overwritten. The copy is normalized to
+// Unix (LF) line endings: a Windows (CRLF) checkout would otherwise bake
+// '\r' into /entrypoint.sh via the Dockerfile heredoc, and the image then
+// fails at boot with `exec /entrypoint.sh: no such file or directory`
+// (the kernel looks for the interpreter `/bin/bash\r`).
 function provisionDockerfile(dir) {
   const dst = path.join(dir, "Dockerfile");
   if (fs.existsSync(dst)) {
-    console.log(`kept:    ${dst} (already exists, left untouched)`);
+    // An existing Dockerfile from an older setup may carry Windows (CRLF)
+    // line endings, which would bake '\r' into /entrypoint.sh. Normalizing
+    // is content-preserving for the build, so repair it in place rather
+    // than leaving a file that can only produce a broken image.
+    const existing = fs.readFileSync(dst, "utf8");
+    if (existing.includes("\r")) {
+      fs.writeFileSync(dst, existing.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+      console.log(`normalized: ${dst} (converted CRLF to LF)`);
+    } else {
+      console.log(`kept:    ${dst} (already exists, left untouched)`);
+    }
   } else {
-    fs.copyFileSync(path.join(PROJECT_ROOT, "Dockerfile"), dst);
+    const src = path.join(PROJECT_ROOT, "Dockerfile");
+    const content = fs.readFileSync(src, "utf8").replaceAll("\r\n", "\n");
+    fs.writeFileSync(dst, content);
     console.log(`created: ${dst} (copied from the repo)`);
   }
   const ignore = path.join(dir, ".dockerignore");
@@ -136,12 +211,14 @@ async function captureEnvironment(opts) {
   const rl = interactive
     ? readline.createInterface({ input: process.stdin, output: process.stdout })
     : null;
-  const willPrompt = Boolean(rl && (!opts.registry || !opts.nfsServer || !opts.nfsBasePath));
+  const willPrompt = Boolean(
+    rl && (!opts.registry || !opts.nfsServer || !opts.nfsBasePath || !opts.namespace)
+  );
   if (willPrompt) {
     console.log("A few questions about your environment (Enter skips to a placeholder):");
   }
   try {
-    return {
+    const values = {
       registry: await ask(rl, opts.registry, {
         flagName: "registry",
         label: "Container registry",
@@ -160,7 +237,15 @@ async function captureEnvironment(opts) {
         example: "/workspaces",
         placeholder: PLACEHOLDERS.nfsBasePath,
       }),
+      namespace: await ask(rl, opts.namespace, {
+        flagName: "namespace",
+        label: "Coding namespace",
+        example: "coding / team-alpha",
+        placeholder: PLACEHOLDERS.namespace,
+      }),
     };
+    values.namespace = normalizeNamespace(values.namespace);
+    return values;
   } finally {
     if (rl) rl.close();
   }
@@ -175,10 +260,45 @@ export async function setup(opts = {}) {
   const cfgFile = globalConfigPath();
   if (fs.existsSync(cfgFile)) {
     console.log(`kept:    ${cfgFile} (already exists, left untouched)`);
+    // An explicit --namespace still tags that namespace (label + any
+    // explicitly-passed values) without touching the kept config file.
+    if (typeof opts.namespace === "string" && opts.namespace.trim()) {
+      await tagNamespaceBestEffort(normalizeNamespace(opts.namespace), {
+        registry: opts.registry,
+        nfsServer: opts.nfsServer,
+        nfsBasePath: opts.nfsBasePath,
+      });
+    }
   } else {
-    const values = await captureEnvironment(opts);
+    // Existing-namespace flow: the GUI hides registry/NFS and sends only
+    // --namespace. Fill blanks from the namespace's stored annotations so
+    // a reselect needs no retyping. Legacy namespaces created before the
+    // annotations existed carry no stored values, so fall back to the live
+    // workloads (deployment NFS volume + image registry). Missing/offline
+    // degrades to the normal prompt-or-placeholder path below.
+    const effective = { ...opts };
+    if (typeof effective.namespace === "string" && effective.namespace.trim()) {
+      try {
+        const ns = normalizeNamespace(effective.namespace);
+        const stored = readNamespaceSetupValues(ns);
+        for (const field of ["registry", "nfsServer", "nfsBasePath"]) {
+          if (!effective[field] && stored[field]) effective[field] = stored[field];
+        }
+        const missing = ["registry", "nfsServer", "nfsBasePath"].some((f) => !effective[f]);
+        if (missing) {
+          const inferred = readDeploymentSetupValues(ns);
+          for (const field of ["registry", "nfsServer", "nfsBasePath"]) {
+            if (!effective[field] && inferred[field]) effective[field] = inferred[field];
+          }
+        }
+      } catch {
+        /* invalid name surfaces via captureEnvironment validation */
+      }
+    }
+    const values = await captureEnvironment(effective);
     fs.writeFileSync(cfgFile, renderTemplate(values));
     console.log(`created: ${cfgFile}`);
+    await tagNamespaceBestEffort(values.namespace, values);
   }
 
   const pair = ensureKeyPair(path.join(dir, "keys"), "id_ed25519");

@@ -69,11 +69,10 @@ esuyo-coding-container/
 │           └── theme/      # useTheme (dark/light)
 └── electron/               # installable desktop shell around the unchanged web GUI + CLI
     ├── package.json        # private package; version kept in sync with the root one; dev/pack/dist scripts
-    ├── electron-builder.yml# packaging (no asar; bundles main/preload/setup/launcher + src + web/server + client dist + config/Dockerfile + prod node_modules)
+    ├── electron-builder.yml# packaging (no asar; bundles main/preload/launcher + src + web/server + client dist + config/Dockerfile + prod node_modules)
     ├── main.js             # main process: encrypted sign-in, loopback server, window, tool checks, auto-update
     ├── preload.js          # sandboxed bridge (auth sync: sign-in / password change / sign-out)
     ├── server-launcher.mjs # utility-process launcher for the bundled GUI server
-    ├── setup.html          # first-run sign-in window (email + password form)
     └── README.md           # desktop run/build notes (dev, installers, signing placeholders)
 ```
 

@@ -23,6 +23,7 @@ Real environment variables win over `.env`, and `.env` never overwrites keys alr
 
 1. **Built-in defaults:** sensible generic values. Environment-specific ones (registry, NFS server, NFS base path) are intentionally left unset and are captured by `coding-container setup`.
 2. **Global config:** `~/.config/<leaf>/config.yaml` (honors `XDG_CONFIG_HOME`; leaf from `CODING_CONFIG_LEAF`), created by `coding-container setup`. Shared by every project: registry, image build, namespace, resources, NFS, SSH. Your SSH key pair lives next to it in `~/.config/<leaf>/keys/`, and the image `Dockerfile` is copied next to it on setup (so this config is self-contained and never points at the repo).
+   The namespace is a naming convention, not access control: one name per developer for private work, one shared name per team; every coding-container namespace carries the `coding-container=true` label and its registry/NFS values are prefilled from namespace annotations.
 3. **Project config:** `config.yaml` in the folder you run the command from (picked up automatically; override with `-c`, else the repo's own `config.yaml` is used). `create` scaffolds it if missing. Only what differs per project:
 
    ```yaml

@@ -99,6 +99,16 @@ program
   .option("--registry <registry>", "container registry (e.g. registry.example.com/you)")
   .option("--nfs-server <server>", "NFS server IP or hostname (your NAS)")
   .option("--nfs-base-path <path>", "NFS base path for per-project workspaces")
+  // Same DNS-1123 pattern as defaultNamespace() in src/utils/instance.js.
+  .option("--namespace <name>", "coding namespace (e.g. coding or team-alpha)", (value) => {
+    const v = String(value).trim();
+    if (v.length < 1 || v.length > 63 || !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(v)) {
+      throw new Error(
+        `--namespace must be a valid k8s name (lowercase alphanumerics and '-', max 63 chars), got: ${JSON.stringify(value)}`
+      );
+    }
+    return v;
+  })
   .action(async (opts) => {
     await setup(opts);
   });

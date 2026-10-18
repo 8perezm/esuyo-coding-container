@@ -81,7 +81,7 @@ The repo's `Dockerfile` is the packaged **starting point**: `coding-container se
 2. Use it in a `RUN`.
 3. Add `NAME: default` to `image.buildArgs` in the global config (`~/.config/coding-container/config.yaml`) **and** to `DEFAULTS.image.buildArgs` in `src/config.js` (they keep in sync manually).
 
-The build installs are intended to fail fast: opencode, pi, herdr, and turbo are installed with version checks (`herdr --version`, corepack `pnpm/yarn --version`) so a broken installer fails the build instead of silently producing a container missing the tools. Note `curl ... | bash/sh` pipes rely on the receiver's exit code. Wrap future installs the same way (download-then-run or explicit version check) rather than assuming `pipefail`.
+The build installs are intended to fail fast: opencode, pi, herdr, and turbo are installed with version checks (`opencode --version`, `herdr --version`, corepack `pnpm/yarn --version`) so a broken installer fails the build instead of silently producing a container missing the tools. Note `curl ... | bash/sh` pipes rely on the receiver's exit code. Wrap future installs the same way (download-then-run or explicit version check) rather than assuming `pipefail`.
 
 One knob exists in the Dockerfile but not in the shipped config templates: `INSTALL_PLAYWRIGHT` (default `true`). Add `INSTALL_PLAYWRIGHT: "false"` to `image.buildArgs` in a config to skip the Playwright + Chromium install (faster builds, smaller image, no browser in the container).
 

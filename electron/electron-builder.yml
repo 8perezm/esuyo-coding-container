@@ -27,7 +27,6 @@ files:
     filter:
       - main.js
       - preload.js
-      - setup.html
       - server-launcher.mjs
       - package.json
   - from: ../src
