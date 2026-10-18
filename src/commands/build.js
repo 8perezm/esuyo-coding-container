@@ -20,6 +20,23 @@ export async function buildImage(cfg) {
         `Fix image.context in your config.`
     );
   }
+  // A Dockerfile with Windows (CRLF) line endings bakes '\r' into the
+  // /entrypoint.sh heredoc, and the image then fails at boot with
+  // `exec /entrypoint.sh: no such file or directory` (exit 255). Fail fast
+  // here with an actionable message instead of pushing a broken image.
+  // Dockerfiles that strip CR themselves (like the shipped template's
+  // `sed -i 's/\r$//' /entrypoint.sh`) build fine even with CRLF, so only
+  // Dockerfiles without such a safeguard are rejected.
+  const dockerfileText = fs.readFileSync(cfg.image.dockerfilePath, "utf8");
+  const stripsCr =
+    dockerfileText.includes("s/\\r$//") || dockerfileText.includes("dos2unix");
+  if (dockerfileText.includes("\r") && !stripsCr) {
+    throw new Error(
+      `config: Dockerfile has Windows (CRLF) line endings: ${cfg.image.dockerfilePath}. ` +
+        `Convert it to Unix (LF) line endings, or remove it and complete setup again ` +
+        `to provision a fresh copy.`
+    );
+  }
   const ref = imageRef(cfg);
   const args = ["build", "-t", ref, "-f", cfg.image.dockerfilePath];
   for (const [key, value] of Object.entries(cfg.image.buildArgs || {})) {

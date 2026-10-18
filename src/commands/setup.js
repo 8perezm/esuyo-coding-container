@@ -151,13 +151,19 @@ container:
 
 // Copy the Dockerfile from the repo into the global folder (the build context)
 // and add a .dockerignore so the SSH keys / this config never enter the build
-// context. Existing files are never overwritten.
+// context. Existing files are never overwritten. The copy is normalized to
+// Unix (LF) line endings: a Windows (CRLF) checkout would otherwise bake
+// '\r' into /entrypoint.sh via the Dockerfile heredoc, and the image then
+// fails at boot with `exec /entrypoint.sh: no such file or directory`
+// (the kernel looks for the interpreter `/bin/bash\r`).
 function provisionDockerfile(dir) {
   const dst = path.join(dir, "Dockerfile");
   if (fs.existsSync(dst)) {
     console.log(`kept:    ${dst} (already exists, left untouched)`);
   } else {
-    fs.copyFileSync(path.join(PROJECT_ROOT, "Dockerfile"), dst);
+    const src = path.join(PROJECT_ROOT, "Dockerfile");
+    const content = fs.readFileSync(src, "utf8").replaceAll("\r\n", "\n");
+    fs.writeFileSync(dst, content);
     console.log(`created: ${dst} (copied from the repo)`);
   }
   const ignore = path.join(dir, ".dockerignore");

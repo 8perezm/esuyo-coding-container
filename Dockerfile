@@ -61,9 +61,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Coding agents / CLIs ---------------------------------------------------
-# opencode (installer adds PATH for interactive shells only; ENV + profile.d
+# opencode v2 (installer adds PATH for interactive shells only; ENV + profile.d
 # cover non-interactive shells and login shells)
-RUN curl -fsSL https://opencode.ai/install | bash
+RUN curl -fsSL https://opencode.ai/v2/install | bash && /root/.opencode/bin/opencode --version
 ENV PATH="/root/.opencode/bin:${PATH}"
 RUN printf 'export PATH="/root/.opencode/bin:$PATH"\n' > /etc/profile.d/opencode.sh
 # pi (pi.dev)
@@ -101,7 +101,7 @@ RUN mkdir -p /root/.ssh && \
 # sshd builds each session's environment from scratch (USER/HOME/PATH/SHELL +
 # PAM), so the container's env (image ENV + pod spec) is not visible in SSH
 # sessions; the entrypoint republishes it for login shells.
-RUN cat > /entrypoint.sh <<'ENTRYPOINT' && chmod +x /entrypoint.sh
+RUN cat > /entrypoint.sh <<'ENTRYPOINT' && sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 #!/bin/bash
 mkdir -p /run/sshd
 : > /etc/profile.d/99-container-env.sh
