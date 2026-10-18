@@ -159,7 +159,17 @@ container:
 function provisionDockerfile(dir) {
   const dst = path.join(dir, "Dockerfile");
   if (fs.existsSync(dst)) {
-    console.log(`kept:    ${dst} (already exists, left untouched)`);
+    // An existing Dockerfile from an older setup may carry Windows (CRLF)
+    // line endings, which would bake '\r' into /entrypoint.sh. Normalizing
+    // is content-preserving for the build, so repair it in place rather
+    // than leaving a file that can only produce a broken image.
+    const existing = fs.readFileSync(dst, "utf8");
+    if (existing.includes("\r")) {
+      fs.writeFileSync(dst, existing.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+      console.log(`normalized: ${dst} (converted CRLF to LF)`);
+    } else {
+      console.log(`kept:    ${dst} (already exists, left untouched)`);
+    }
   } else {
     const src = path.join(PROJECT_ROOT, "Dockerfile");
     const content = fs.readFileSync(src, "utf8").replaceAll("\r\n", "\n");
