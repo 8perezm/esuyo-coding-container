@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const libPath = path.join(root, 'web/client/src/lib/projects.tsx');
 const projectsPath = path.join(root, 'web/client/src/pages/ProjectsPage.tsx');
+const overviewPath = path.join(root, 'web/client/src/pages/OverviewPage.tsx');
 const editPath = path.join(root, 'web/client/src/pages/ProjectEditPage.tsx');
 const deployTabPath = path.join(root, 'web/client/src/components/ProjectDeployTab.tsx');
 const appPath = path.join(root, 'web/client/src/App.tsx');
@@ -19,6 +20,7 @@ const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.ts
 
 const lib = await readFile(libPath, 'utf8');
 const projects = await readFile(projectsPath, 'utf8');
+const overview = await readFile(overviewPath, 'utf8');
 const edit = await readFile(editPath, 'utf8');
 const deploy = await readFile(deployTabPath, 'utf8');
 const app = await readFile(appPath, 'utf8');
@@ -99,14 +101,14 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('Add project'), 'missing add-project affordance');
   });
 
-  it('defaults the status filter to running and persists the selection', () => {
+  it('defaults the status filter to all and persists the selection', () => {
     assert.ok(projects.includes('projectsTableStatusFilter'), 'missing persisted filter key');
     assert.match(projects, /readStoredStatusFilter/);
     assert.ok(
       projects.includes('useState<StatusFilter>(() => readStoredStatusFilter())'),
-      'status filter must init from storage (default running)',
+      'status filter must init from storage (default all)',
     );
-    assert.ok(projects.includes("return 'running'"), 'stored-filter fallback must default to running');
+    assert.ok(projects.includes("return 'all'"), 'stored-filter fallback must default to all');
   });
 
   it('shows an EmptyState when there are no projects and a Spinner while loading', () => {
@@ -204,6 +206,35 @@ describe('ProjectEditPage deploy tab contract', () => {
     assert.ok(edit.includes('<ProjectDeployTab project={project}'), 'deploy tab must render for the edited project');
     assert.ok(edit.includes('page-project-edit-tab-deploy'), 'missing deploy tab ref');
     assert.ok(edit.includes('page-project-edit-panel-deploy'), 'missing deploy panel ref');
+  });
+});
+
+describe('OverviewPage projects table contract', () => {
+  it('defaults the status filter to running and persists the selection', () => {
+    assert.ok(overview.includes('overviewProjectsFilter'), 'missing persisted filter key');
+    assert.match(overview, /readStoredFilter/);
+    assert.ok(
+      overview.includes('useState<StatusFilter>(readStoredFilter)'),
+      'status filter must init from storage (default running)',
+    );
+    assert.ok(overview.includes("return 'running'"), 'stored-filter fallback must default to running');
+  });
+
+  it('offers an icon-only terminal action linking to the project terminal page', () => {
+    assert.ok(overview.includes('page-overview-action-terminal'), 'missing overview terminal action');
+    assert.ok(
+      overview.includes('/ssh'),
+      'terminal action must link to the terminal page',
+    );
+    assert.ok(overview.includes('SquareTerminal'), 'terminal action must use the terminal icon');
+    assert.ok(
+      !overview.includes('> Terminal<'),
+      'overview terminal action must be icon-only (no "Terminal" label)',
+    );
+    assert.ok(
+      overview.indexOf('page-overview-action-terminal') < overview.indexOf('page-overview-action-delete'),
+      'terminal action must sit left of the delete button',
+    );
   });
 });
 

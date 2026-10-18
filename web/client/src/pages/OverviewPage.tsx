@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, RefreshCw, Rocket, Trash2, X } from 'lucide-react';
+import { CheckCircle2, RefreshCw, Rocket, SquareTerminal, Trash2, X } from 'lucide-react';
 import { ApiError, api } from '../lib/api';
 import { useUsageThresholds } from '../lib/usageThresholds';
 import { JobOutput } from '../components/JobOutput';
@@ -475,9 +475,9 @@ const SORT_KEYS: ProjectSortKey[] = ['name', 'status', 'age', 'cpu', 'memory', '
 function readStoredFilter(): StatusFilter {
   try {
     const v = window.localStorage.getItem(FILTER_STORAGE_KEY);
-    return v === 'running' || v === 'stopped' ? v : 'all';
+    return v === 'all' || v === 'stopped' ? v : 'running';
   } catch {
-    return 'all';
+    return 'running';
   }
 }
 
@@ -1318,6 +1318,17 @@ export function OverviewPage() {
                         >
                           <Rocket size={16} aria-hidden="true" /> {pending === `deploy:${w.projectId}` ? 'Starting…' : 'Deploy'}
                         </Button>
+                        {w.deployed && w.projectId ? (
+                          <Link
+                            to={`/projects/${encodeURIComponent(w.projectId)}/ssh`}
+                            className="btn btn-secondary"
+                            aria-label={`Open terminal for ${w.name}`}
+                            title="Open terminal"
+                            data-ref="page-overview-action-terminal"
+                          >
+                            <SquareTerminal size={16} aria-hidden="true" />
+                          </Link>
+                        ) : null}
                         <Button
                           variant="secondary"
                           onClick={() => void runOp(w, 'delete')}

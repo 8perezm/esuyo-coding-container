@@ -78,7 +78,7 @@ function readStoredStatusFilter(): StatusFilter {
   } catch {
     /* storage unavailable — fall back to default */
   }
-  return 'running';
+  return 'all';
 }
 
 function readStoredSortKey(): SortKey {
