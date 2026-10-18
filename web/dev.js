@@ -4,6 +4,7 @@
  *
  *   npm run dev          # backend (:3401, from .env PORT) + Vite (:3400)
  *   npm run dev:kill     # kill orphaned dev servers still holding those ports
+ *   npm run dev-stop     # alias for dev:kill
  *
  * Zero dependencies (node: builtins only). `npm --prefix` is not used so the
  * client keeps its own lockfile/install; the client must be installed once:

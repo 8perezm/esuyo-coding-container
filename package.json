@@ -11,6 +11,7 @@
     "start": "node src/index.js",
     "dev": "node web/dev.js",
     "dev:kill": "node web/kill-dev.js",
+    "dev-stop": "node web/kill-dev.js",
     "dev:cli": "node src/index.js",
     "dev:server": "node web/server/server.js",
     "dev:client": "npm --prefix web/client run dev",
