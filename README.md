@@ -12,10 +12,10 @@ For private, internal Kubernetes clusters only. Do not expose to the public web.
 
 <table>
   <tr>
-    <td><img src="./assets/coding-containers-1.png" alt="Dashboard" /></td>
-    <td><img src="./assets/coding-containers-terminal.png" alt="Browser terminal" /></td>
+    <td colspan="3"><img src="./assets/coding-containers.png" alt="Dashboard" /></td>
   </tr>
   <tr>
+    <td><img src="./assets/coding-containers-terminal.png" alt="Browser terminal" /></td>
     <td><img src="./assets/coding-containers-images.png" alt="Shared images" /></td>
     <td><img src="./assets/coding-containers-ssh.png" alt="SSH and keys" /></td>
   </tr>
