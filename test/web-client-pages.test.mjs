@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sshPath = path.join(root, 'web/client/src/pages/SshKeysPage.tsx');
+const terminalPath = path.join(root, 'web/client/src/pages/SshTerminalPage.tsx');
 const validatePath = path.join(root, 'web/client/src/components/ValidatePanel.tsx');
 const editPath = path.join(root, 'web/client/src/pages/ProjectEditPage.tsx');
 const createPath = path.join(root, 'web/client/src/pages/ProjectCreatePage.tsx');
@@ -19,6 +20,7 @@ const appPath = path.join(root, 'web/client/src/App.tsx');
 const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.tsx');
 
 const ssh = await readFile(sshPath, 'utf8');
+const terminal = await readFile(terminalPath, 'utf8');
 const validate = await readFile(validatePath, 'utf8');
 const edit = await readFile(editPath, 'utf8');
 const create = await readFile(createPath, 'utf8');
@@ -186,5 +188,54 @@ describe('Project create/edit contract (managed configs + starter)', () => {
     assert.ok(edit.includes('page-project-edit-config-fill'), 'missing fill-with-example button');
     assert.ok(edit.includes('page-project-edit-config-download'), 'missing download-example button');
     assert.ok(edit.includes('/api/project-starter?projectId='), 'must fetch the starter from /api/project-starter');
+  });
+});
+
+describe('SshTerminalPage tabs contract', () => {
+  it('exports SshTerminalPage', () => {
+    assert.match(terminal, /export function SshTerminalPage\(\)/);
+  });
+
+  it('renders a tab bar with one trigger per tab plus new-tab and close-tab controls', () => {
+    assert.ok(terminal.includes('page-project-ssh-tablist'), 'missing tablist ref');
+    assert.ok(terminal.includes('page-project-ssh-tab"'), 'missing per-tab ref');
+    assert.ok(terminal.includes('page-project-ssh-new-tab'), 'missing new-tab button');
+    assert.ok(terminal.includes('page-project-ssh-close-tab'), 'missing close-tab button');
+    assert.match(terminal, /role="tablist"|TabsList/);
+  });
+
+  it('gives every tab its own terminal plus WebSocket session', () => {
+    assert.match(terminal, /function SshTerminalPane\(/);
+    // Per-pane refs (not a single shared terminal/ws) so each tab dials its
+    // own /api/ssh/<projectId> socket with its own shell channel.
+    assert.ok(terminal.includes('wsRef = useRef'), 'each pane must own its WebSocket');
+    assert.ok(terminal.includes('termRef = useRef'), 'each pane must own its terminal');
+    assert.ok(terminal.includes('/api/ssh/${encodeURIComponent(projectId)}'), 'each pane must open its own session socket');
+  });
+
+  it('keeps background tabs mounted and only refits the visible pane', () => {
+    assert.match(terminal, /TabsContent/);
+    assert.ok(
+      terminal.includes('stays mounted') || terminal.includes('Every pane stays mounted'),
+      'must document that background panes stay mounted',
+    );
+    assert.ok(terminal.includes('activeRef'), 'window resizes must skip hidden panes');
+    assert.ok(
+      terminal.includes('clientWidth === 0'),
+      'fitting must skip zero-size (hidden) containers so a late socket-open cannot collapse a background tab',
+    );
+    assert.ok(
+      terminal.includes('becomes visible') || terminal.includes('refit once it becomes visible'),
+      'switching tabs must refit the newly visible pane',
+    );
+  });
+
+  it('reconnects and reports status for the active tab, and resets tabs between projects', () => {
+    assert.ok(terminal.includes('reconnectActive'), 'header reconnect must target the active tab');
+    assert.ok(terminal.includes('handleConnChange'), 'panes must report state for the tab status');
+    assert.ok(
+      terminal.includes('firstProjectRef'),
+      'navigating between projects must reset to a single fresh tab',
+    );
   });
 });

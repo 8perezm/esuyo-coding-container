@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Maximize2, Minimize2, RotateCcw, SquareTerminal } from 'lucide-react';
+import { Maximize2, Minimize2, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { api } from '../lib/api';
 import { useProjects } from '../lib/projects';
-import { Badge, Button, Card, PageHeader, Spinner } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  PageHeader,
+  Spinner,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '../components/ui';
 
 interface SshInfo {
   project: { id: string; name: string };
@@ -28,45 +38,60 @@ function socketUrl(projectId: string, cols: number, rows: number): string {
   return `${protocol}//${window.location.host}/api/ssh/${encodeURIComponent(projectId)}?cols=${cols}&rows=${rows}`;
 }
 
-export function SshTerminalPage() {
-  const { id } = useParams<{ id: string }>();
-  const { projects, loading: projectsLoading } = useProjects();
+function stateDotColor(state: ConnState | undefined): string {
+  if (state === 'open') return 'var(--color-success, #16a34a)';
+  if (state === 'closed') return 'var(--color-error, #b3261e)';
+  return 'var(--color-warning, #d97706)';
+}
 
+/** Imperative controls one terminal pane exposes to the page (active tab). */
+interface SessionHandle {
+  reconnect: () => void;
+  refit: () => void;
+}
+
+interface TerminalTab {
+  id: string;
+  title: string;
+}
+
+interface TerminalPaneProps {
+  projectId: string;
+  tabId: string;
+  active: boolean;
+  fillHeight: boolean;
+  onConnChange: (tabId: string, state: ConnState, message: string | null) => void;
+  registerHandle: (tabId: string, handle: SessionHandle | null) => void;
+}
+
+/**
+ * One terminal session: its own xterm instance plus its own WebSocket (and
+ * therefore its own server-side port-forward + SSH shell channel). Panes stay
+ * mounted while hidden so background tabs keep running; only the visible pane
+ * measures its container.
+ */
+function SshTerminalPane({
+  projectId,
+  tabId,
+  active,
+  fillHeight,
+  onConnChange,
+  registerHandle,
+}: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const attemptRef = useRef(0);
-  const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
-  const [info, setInfo] = useState<SshInfo | null>(null);
-  const [infoError, setInfoError] = useState<string | null>(null);
   const [connState, setConnState] = useState<ConnState>('connecting');
   const [connMessage, setConnMessage] = useState<string | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
-  const projectName =
-    info?.project.name ?? projects.find((p) => p.id === id)?.name ?? 'Project terminal';
-
-  // Connection summary for the header (name, namespace, user).
   useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    setInfo(null);
-    setInfoError(null);
-    api
-      .get<SshInfo>(`/api/ssh/info?projectId=${encodeURIComponent(id)}`)
-      .then((data) => {
-        if (!cancelled) setInfo(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setInfoError(errMsg(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+    onConnChange(tabId, connState, connMessage);
+  }, [tabId, connState, connMessage, onConnChange]);
 
   // Fit the grid to the container. Wraps the fit addon with a correction:
   // the addon's scrollbar allowance can read 0 in this layout, leaving
@@ -79,6 +104,9 @@ export function SshTerminalPage() {
     const fit = fitRef.current;
     const container = containerRef.current;
     if (!term || !fit || !container) return;
+    // Hidden panes (background tabs) have no size; fitting now would collapse
+    // the grid to a couple of columns. Skip it — showing the tab refits.
+    if (container.clientWidth === 0 || container.clientHeight === 0) return;
     try {
       fit.fit();
     } catch {
@@ -113,45 +141,11 @@ export function SshTerminalPage() {
     }
   }, [fitTerminal]);
 
-  const toggleFullscreen = useCallback(async () => {
-    const target = fullscreenTargetRef.current;
-    if (!target) return;
-    setFullscreenError(null);
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (typeof target.requestFullscreen === 'function') {
-        await target.requestFullscreen();
-      } else {
-        setFullscreenError('Full screen is not supported in this browser.');
-      }
-    } catch {
-      setFullscreenError('Could not switch full screen mode.');
-    }
-  }, []);
-
-  // Track full-screen switches (including Escape exiting natively) and
-  // refit once the layout has settled.
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      const active = Boolean(document.fullscreenElement);
-      setIsFullscreen(active);
-      if (!active) setFullscreenError(null);
-      requestAnimationFrame(() => {
-        window.setTimeout(refitAndNotify, 60);
-      });
-    };
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-    };
-  }, [refitAndNotify]);
-
   const connect = useCallback(
     (attempt: number) => {
       const container = containerRef.current;
       const term = termRef.current;
-      if (!container || !term || !id) return;
+      if (!container || !term || !projectId) return;
 
       fitTerminal();
       const cols = term.cols || 80;
@@ -160,7 +154,7 @@ export function SshTerminalPage() {
       setConnState('connecting');
       setConnMessage(null);
 
-      const ws = new WebSocket(socketUrl(id, cols, rows));
+      const ws = new WebSocket(socketUrl(projectId, cols, rows));
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
@@ -198,13 +192,34 @@ export function SshTerminalPage() {
         // onclose follows with the details; keep the state change in one place.
       };
     },
-    [id, fitTerminal, refitAndNotify],
+    [projectId, fitTerminal, refitAndNotify],
   );
+
+  const reconnect = useCallback(() => {
+    const ws = wsRef.current;
+    wsRef.current = null;
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    termRef.current?.clear();
+    const attempt = attemptRef.current + 1;
+    attemptRef.current = attempt;
+    connect(attempt);
+  }, [connect]);
+
+  useEffect(() => {
+    registerHandle(tabId, { reconnect, refit: refitAndNotify });
+    return () => {
+      registerHandle(tabId, null);
+    };
+  }, [tabId, reconnect, refitAndNotify, registerHandle]);
 
   // Terminal lifecycle: create once, reconnect on demand.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !id) return;
+    if (!container || !projectId) return;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -238,14 +253,8 @@ export function SshTerminalPage() {
       }
     });
 
-    const onWindowResize = () => {
-      refitAndNotify();
-    };
-    window.addEventListener('resize', onWindowResize);
-
     return () => {
       attemptRef.current += 1;
-      window.removeEventListener('resize', onWindowResize);
       disposable.dispose();
       const ws = wsRef.current;
       wsRef.current = null;
@@ -258,21 +267,182 @@ export function SshTerminalPage() {
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [id, connect, refitAndNotify]);
+  }, [projectId, connect, refitAndNotify]);
 
-  const reconnect = useCallback(() => {
-    const ws = wsRef.current;
-    wsRef.current = null;
+  // The container has no size while hidden, so refit once it becomes visible.
+  useEffect(() => {
+    if (!active) return;
+    const raf = requestAnimationFrame(() => {
+      window.setTimeout(refitAndNotify, 30);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [active, refitAndNotify]);
+
+  // Window resizes only affect the visible tab; hidden panes have no size.
+  useEffect(() => {
+    const onWindowResize = () => {
+      if (activeRef.current) refitAndNotify();
+    };
+    window.addEventListener('resize', onWindowResize);
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
+    };
+  }, [refitAndNotify]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={
+        fillHeight
+          ? { flex: 1, minHeight: 0, background: '#18181b', padding: 8 }
+          : { height: 480, background: '#18181b', padding: 8 }
+      }
+      data-ref="page-project-ssh-terminal"
+      data-tab-id={tabId}
+    />
+  );
+}
+
+export function SshTerminalPage() {
+  const { id } = useParams<{ id: string }>();
+  const { projects, loading: projectsLoading } = useProjects();
+
+  const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const handlesRef = useRef(new Map<string, SessionHandle>());
+  const tabCounter = useRef(1);
+
+  const [info, setInfo] = useState<SshInfo | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => [{ id: 'tab-1', title: 'Tab 1' }]);
+  const [activeId, setActiveId] = useState('tab-1');
+  const [tabStates, setTabStates] = useState<Record<string, { state: ConnState; message: string | null }>>({});
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  const projectName =
+    info?.project.name ?? projects.find((p) => p.id === id)?.name ?? 'Project terminal';
+
+  // Connection summary for the header (name, namespace, user).
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setInfo(null);
+    setInfoError(null);
+    api
+      .get<SshInfo>(`/api/ssh/info?projectId=${encodeURIComponent(id)}`)
+      .then((data) => {
+        if (!cancelled) setInfo(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setInfoError(errMsg(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  // Start over with a single fresh tab when navigating between projects, so a
+  // session opened for one project never follows into another. Skipped on the
+  // initial mount (tabs already start fresh).
+  const firstProjectRef = useRef(id);
+  useEffect(() => {
+    if (firstProjectRef.current === id) return;
+    firstProjectRef.current = id;
+    tabCounter.current = 1;
+    handlesRef.current.clear();
+    setTabStates({});
+    setTabs([{ id: 'tab-1', title: 'Tab 1' }]);
+    setActiveId('tab-1');
+  }, [id]);
+
+  const handleConnChange = useCallback((tabId: string, state: ConnState, message: string | null) => {
+    setTabStates((prev) => {
+      const current = prev[tabId];
+      if (current && current.state === state && current.message === message) return prev;
+      return { ...prev, [tabId]: { state, message } };
+    });
+  }, []);
+
+  const registerHandle = useCallback((tabId: string, handle: SessionHandle | null) => {
+    if (handle) handlesRef.current.set(tabId, handle);
+    else handlesRef.current.delete(tabId);
+  }, []);
+
+  const addTab = useCallback(() => {
+    tabCounter.current += 1;
+    const n = tabCounter.current;
+    const tab = { id: `tab-${n}`, title: `Tab ${n}` };
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
+  }, []);
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      if (tabs.length <= 1) return;
+      const idx = tabs.findIndex((t) => t.id === tabId);
+      if (idx === -1) return;
+      const remaining = tabs.filter((t) => t.id !== tabId);
+      setTabs(remaining);
+      setTabStates((prev) => {
+        if (!(tabId in prev)) return prev;
+        const next = { ...prev };
+        delete next[tabId];
+        return next;
+      });
+      handlesRef.current.delete(tabId);
+      if (tabId === activeId) {
+        const next = remaining[Math.min(idx, remaining.length - 1)];
+        if (next) setActiveId(next.id);
+      }
+    },
+    [tabs, activeId],
+  );
+
+  const reconnectActive = useCallback(() => {
+    handlesRef.current.get(activeId)?.reconnect();
+  }, [activeId]);
+
+  const toggleFullscreen = useCallback(async () => {
+    const target = fullscreenTargetRef.current;
+    if (!target) return;
+    setFullscreenError(null);
     try {
-      ws?.close();
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (typeof target.requestFullscreen === 'function') {
+        await target.requestFullscreen();
+      } else {
+        setFullscreenError('Full screen is not supported in this browser.');
+      }
     } catch {
-      /* ignore */
+      setFullscreenError('Could not switch full screen mode.');
     }
-    termRef.current?.clear();
-    const attempt = attemptRef.current + 1;
-    attemptRef.current = attempt;
-    connect(attempt);
-  }, [connect]);
+  }, []);
+
+  // Track full-screen switches (including Escape exiting natively) and
+  // refit the visible tab once the layout has settled.
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+      if (!active) setFullscreenError(null);
+      requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          handlesRef.current.get(activeIdRef.current)?.refit();
+        }, 60);
+      });
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    };
+  }, []);
+
+  const activeState: ConnState = tabStates[activeId]?.state ?? 'connecting';
+  const activeMessage: string | null = tabStates[activeId]?.message ?? null;
 
   if (!id) {
     return (
@@ -308,13 +478,13 @@ export function SshTerminalPage() {
           <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
             <Button
               variant="secondary"
-              onClick={reconnect}
-              disabled={connState === 'connecting'}
+              onClick={reconnectActive}
+              disabled={activeState === 'connecting'}
               data-ref="page-project-ssh-reconnect"
               aria-label="Reconnect terminal"
             >
               <RotateCcw size={16} aria-hidden="true" />{' '}
-              {connState === 'connecting' ? 'Connecting…' : 'Reconnect'}
+              {activeState === 'connecting' ? 'Connecting…' : 'Reconnect'}
             </Button>
             <Link
               to={`/projects/${encodeURIComponent(id)}/edit`}
@@ -364,6 +534,91 @@ export function SshTerminalPage() {
         }
         data-ref="page-project-ssh-terminal-card"
       >
+        <Tabs
+          value={activeId}
+          onValueChange={setActiveId}
+          style={
+            isFullscreen
+              ? { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }
+              : undefined
+          }
+          data-ref="page-project-ssh-tabs"
+        >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 12px',
+            borderBottom: '1px solid var(--gray-200)',
+            flexWrap: 'wrap',
+          }}
+          data-ref="page-project-ssh-tabbar"
+        >
+          <TabsList
+            aria-label="Terminal sessions"
+            data-ref="page-project-ssh-tablist"
+            style={{ flexWrap: 'wrap', minWidth: 0, flex: 1 }}
+          >
+              {tabs.map((t) => {
+                const state = tabStates[t.id]?.state;
+                return (
+                  <span
+                    key={t.id}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}
+                  >
+                    <TabsTrigger
+                      value={t.id}
+                      data-ref="page-project-ssh-tab"
+                      data-tab-id={t.id}
+                      title={`${t.title} — ${state ?? 'connecting'}`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: stateDotColor(state),
+                          flexShrink: 0,
+                        }}
+                      />
+                      {t.title}
+                    </TabsTrigger>
+                    {tabs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => closeTab(t.id)}
+                        aria-label={`Close ${t.title}`}
+                        title={`Close ${t.title}`}
+                        data-ref="page-project-ssh-close-tab"
+                        data-tab-id={t.id}
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: '6px 6px 6px 2px',
+                          lineHeight: 0,
+                        }}
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </TabsList>
+          <Button
+            variant="secondary"
+            onClick={addTab}
+            data-ref="page-project-ssh-new-tab"
+            aria-label="Open a new terminal tab"
+            title="Open a new terminal tab"
+          >
+            <Plus size={16} aria-hidden="true" /> New tab
+          </Button>
+        </div>
         <div
           style={{
             display: 'flex',
@@ -375,20 +630,20 @@ export function SshTerminalPage() {
           data-ref="page-project-ssh-statusbar"
         >
           <SquareTerminal size={16} aria-hidden="true" />
-          {connState === 'open' ? (
+          {activeState === 'open' ? (
             <Badge tone="accent" data-ref="page-project-ssh-status">Connected</Badge>
-          ) : connState === 'connecting' ? (
+          ) : activeState === 'connecting' ? (
             <Badge data-ref="page-project-ssh-status">Connecting…</Badge>
           ) : (
             <Badge data-ref="page-project-ssh-status">Disconnected</Badge>
           )}
-          {connMessage && connState === 'closed' && (
+          {activeMessage && activeState === 'closed' && (
             <span
               style={{ fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}
               role="status"
               data-ref="page-project-ssh-close-message"
             >
-              {connMessage}
+              {activeMessage}
             </span>
           )}
           {fullscreenError && (
@@ -418,15 +673,34 @@ export function SshTerminalPage() {
             </Button>
           </span>
         </div>
-        <div
-          ref={containerRef}
-          style={
-            isFullscreen
-              ? { flex: 1, minHeight: 0, background: '#18181b', padding: 8 }
-              : { height: 480, background: '#18181b', padding: 8 }
-          }
-          data-ref="page-project-ssh-terminal"
-        />
+        {/*
+          Every pane stays mounted so background tabs keep their session and
+          scrollback; TabsContent hides the inactive ones. Each pane owns its
+          own terminal + WebSocket, so each tab is an independent session.
+        */}
+          {tabs.map((t) => (
+            <TabsContent
+              key={t.id}
+              value={t.id}
+              // Flex only on the visible tab: an inline display would override
+              // the `hidden` attribute that keeps background tabs out of view.
+              style={
+                isFullscreen && t.id === activeId
+                  ? { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }
+                  : undefined
+              }
+            >
+              <SshTerminalPane
+                projectId={id}
+                tabId={t.id}
+                active={t.id === activeId}
+                fillHeight={isFullscreen}
+                onConnChange={handleConnChange}
+                registerHandle={registerHandle}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
       </Card>
       </div>
     </div>
