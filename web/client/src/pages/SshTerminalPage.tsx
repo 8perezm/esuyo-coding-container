@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Maximize2, Minimize2, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
+import { Maximize2, Minimize2, Plus, RotateCcw, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { api } from '../lib/api';
 import { useProjects } from '../lib/projects';
 import {
-  Badge,
   Button,
   Card,
   PageHeader,
@@ -548,99 +547,121 @@ export function SshTerminalPage() {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '8px 12px',
+            gap: 10,
+            padding: 6,
             borderBottom: '1px solid var(--gray-200)',
-            flexWrap: 'wrap',
           }}
-          data-ref="page-project-ssh-tabbar"
+          data-ref="page-project-ssh-unified-bar"
         >
           <TabsList
             aria-label="Terminal sessions"
             data-ref="page-project-ssh-tablist"
-            style={{ flexWrap: 'wrap', minWidth: 0, flex: 1 }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              gap: 6,
+              padding: 2,
+              background: 'transparent',
+              border: 0,
+              borderRadius: 0,
+            }}
           >
-              {tabs.map((t) => {
-                const state = tabStates[t.id]?.state;
-                return (
-                  <span
-                    key={t.id}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}
+            {tabs.map((t) => {
+              const state = tabStates[t.id]?.state;
+              const isActive = t.id === activeId;
+              return (
+                <span
+                  key={t.id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    flex: 'none',
+                    padding: tabs.length > 1 ? '5px 6px 5px 12px' : '5px 12px',
+                    border: `1px solid ${isActive ? 'var(--text-muted)' : 'var(--gray-200)'}`,
+                    borderRadius: 0,
+                    background: isActive ? 'var(--bg-card)' : 'transparent',
+                  }}
+                >
+                  <TabsTrigger
+                    value={t.id}
+                    data-ref="page-project-ssh-tab"
+                    data-tab-id={t.id}
+                    title={`${t.title} — ${state ?? 'connecting'}`}
+                    style={{
+                      border: 0,
+                      background: 'transparent',
+                      padding: 0,
+                      minHeight: 0,
+                      borderRadius: 0,
+                      boxShadow: 'none',
+                    }}
                   >
-                    <TabsTrigger
-                      value={t.id}
-                      data-ref="page-project-ssh-tab"
-                      data-tab-id={t.id}
-                      title={`${t.title} — ${state ?? 'connecting'}`}
-                    >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: stateDotColor(state),
+                        flexShrink: 0,
+                      }}
+                    />
+                    {t.title}
+                    {isActive && (
                       <span
-                        aria-hidden="true"
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          background: stateDotColor(state),
-                          flexShrink: 0,
-                        }}
-                      />
-                      {t.title}
-                    </TabsTrigger>
-                    {tabs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => closeTab(t.id)}
-                        aria-label={`Close ${t.title}`}
-                        title={`Close ${t.title}`}
-                        data-ref="page-project-ssh-close-tab"
-                        data-tab-id={t.id}
-                        style={{
-                          border: 0,
-                          background: 'transparent',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          padding: '6px 6px 6px 2px',
-                          lineHeight: 0,
-                        }}
+                        data-ref="page-project-ssh-status"
+                        style={{ fontSize: 'var(--font-size-xs)' }}
                       >
-                        <X size={14} aria-hidden="true" />
-                      </button>
+                        ·{' '}
+                        {state === 'open'
+                          ? 'Connected'
+                          : state === 'closed'
+                            ? 'Disconnected'
+                            : 'Connecting…'}
+                      </span>
                     )}
-                  </span>
-                );
-              })}
-            </TabsList>
-          <Button
-            variant="secondary"
-            onClick={addTab}
-            data-ref="page-project-ssh-new-tab"
-            aria-label="Open a new terminal tab"
-            title="Open a new terminal tab"
-          >
-            <Plus size={16} aria-hidden="true" /> New tab
-          </Button>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 12px',
-            borderBottom: '1px solid var(--gray-200)',
-          }}
-          data-ref="page-project-ssh-statusbar"
-        >
-          <SquareTerminal size={16} aria-hidden="true" />
-          {activeState === 'open' ? (
-            <Badge tone="accent" data-ref="page-project-ssh-status">Connected</Badge>
-          ) : activeState === 'connecting' ? (
-            <Badge data-ref="page-project-ssh-status">Connecting…</Badge>
-          ) : (
-            <Badge data-ref="page-project-ssh-status">Disconnected</Badge>
-          )}
+                  </TabsTrigger>
+                  {tabs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => closeTab(t.id)}
+                      aria-label={`Close ${t.title}`}
+                      title={`Close ${t.title}`}
+                      data-ref="page-project-ssh-close-tab"
+                      data-tab-id={t.id}
+                      style={{
+                        border: 0,
+                        background: 'transparent',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: 4,
+                        lineHeight: 0,
+                        borderRadius: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </TabsList>
           {activeMessage && activeState === 'closed' && (
             <span
-              style={{ fontSize: 'var(--font-size-md)', color: 'var(--text-muted)' }}
+              style={{
+                fontSize: 'var(--font-size-md)',
+                color: 'var(--text-muted)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 260,
+                flex: 'none',
+              }}
               role="status"
+              title={activeMessage}
               data-ref="page-project-ssh-close-message"
             >
               {activeMessage}
@@ -648,30 +669,47 @@ export function SshTerminalPage() {
           )}
           {fullscreenError && (
             <span
-              style={{ fontSize: 'var(--font-size-md)', color: 'var(--color-error, #b3261e)' }}
+              style={{
+                fontSize: 'var(--font-size-md)',
+                color: 'var(--color-error, #b3261e)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 260,
+                flex: 'none',
+              }}
               role="alert"
+              title={fullscreenError}
               data-ref="page-project-ssh-fullscreen-error"
             >
               {fullscreenError}
             </span>
           )}
-          <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
-            <Button
-              variant="secondary"
-              onClick={() => void toggleFullscreen()}
-              data-ref="page-project-ssh-fullscreen"
-              aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
-              aria-pressed={isFullscreen}
-              title={isFullscreen ? 'Exit full screen (Esc)' : 'Fill the screen with the terminal'}
-            >
-              {isFullscreen ? (
-                <Minimize2 size={16} aria-hidden="true" />
-              ) : (
-                <Maximize2 size={16} aria-hidden="true" />
-              )}{' '}
-              {isFullscreen ? 'Exit full screen' : 'Full screen'}
-            </Button>
-          </span>
+          <Button
+            variant="secondary"
+            onClick={addTab}
+            data-ref="page-project-ssh-new-tab"
+            aria-label="Open a new terminal tab"
+            title="Open a new terminal tab"
+            style={{ padding: '6px 8px', flex: 'none' }}
+          >
+            <Plus size={16} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void toggleFullscreen()}
+            data-ref="page-project-ssh-fullscreen"
+            aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
+            aria-pressed={isFullscreen}
+            title={isFullscreen ? 'Exit full screen (Esc)' : 'Fill the screen with the terminal'}
+            style={{ padding: '6px 8px', flex: 'none' }}
+          >
+            {isFullscreen ? (
+              <Minimize2 size={16} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={16} aria-hidden="true" />
+            )}
+          </Button>
         </div>
         {/*
           Every pane stays mounted so background tabs keep their session and

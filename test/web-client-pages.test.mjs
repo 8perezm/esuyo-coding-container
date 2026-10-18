@@ -196,12 +196,29 @@ describe('SshTerminalPage tabs contract', () => {
     assert.match(terminal, /export function SshTerminalPage\(\)/);
   });
 
-  it('renders a tab bar with one trigger per tab plus new-tab and close-tab controls', () => {
+  it('renders one unified bar with a trigger per tab plus new-tab and close-tab controls', () => {
+    assert.ok(terminal.includes('page-project-ssh-unified-bar'), 'missing unified bar ref');
+    assert.ok(!terminal.includes('page-project-ssh-tabbar'), 'old tabbar ref must be gone');
+    assert.ok(!terminal.includes('page-project-ssh-statusbar'), 'old statusbar ref must be gone');
     assert.ok(terminal.includes('page-project-ssh-tablist'), 'missing tablist ref');
     assert.ok(terminal.includes('page-project-ssh-tab"'), 'missing per-tab ref');
     assert.ok(terminal.includes('page-project-ssh-new-tab'), 'missing new-tab button');
     assert.ok(terminal.includes('page-project-ssh-close-tab'), 'missing close-tab button');
     assert.match(terminal, /role="tablist"|TabsList/);
+  });
+
+  it('carries the connection status in the active tab and uses icon-only bar actions', () => {
+    assert.ok(terminal.includes('page-project-ssh-status'), 'active tab must show the status word');
+    assert.ok(terminal.includes("·{' '}"), 'active tab must read "Tab N · <status>"');
+    assert.ok(!terminal.includes('Badge'), 'status badge must be gone; status lives in the active tab');
+    assert.ok(
+      terminal.includes('aria-label="Open a new terminal tab"'),
+      'new-tab must be an icon-only button with an accessible label',
+    );
+    assert.ok(
+      terminal.includes("aria-label={isFullscreen ? 'Exit full screen'"),
+      'fullscreen must be an icon-only toggle with an accessible label',
+    );
   });
 
   it('gives every tab its own terminal plus WebSocket session', () => {

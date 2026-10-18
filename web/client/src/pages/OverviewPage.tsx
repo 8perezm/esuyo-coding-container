@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, RefreshCw, Rocket, SquareTerminal, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Rocket, SquareTerminal, Trash2, X } from 'lucide-react';
 import { ApiError, api } from '../lib/api';
 import { useUsageThresholds } from '../lib/usageThresholds';
 import { JobOutput } from '../components/JobOutput';
+import { RefreshControl } from '../components/RefreshControl';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, PageHeader, Spinner, Table, TableContainer, TBody, TD, TH, THead, TR } from '../components/ui';
 
 interface PodStatus {
@@ -469,6 +470,11 @@ type StatusFilter = 'all' | 'running' | 'stopped';
 const FILTER_STORAGE_KEY = 'overviewProjectsFilter';
 const SORT_KEY_STORAGE_KEY = 'overviewProjectsSortKey';
 const SORT_DIR_STORAGE_KEY = 'overviewProjectsSortDir';
+const REFRESH_INTERVAL_STORAGE_KEY = 'overviewRefreshInterval';
+
+/** Auto-refresh cadences offered by the dashboard refresh control (0 = off). */
+const REFRESH_INTERVAL_SECONDS = [0, 5, 10, 15, 30, 60];
+const DEFAULT_REFRESH_INTERVAL_SECONDS = 15;
 
 const SORT_KEYS: ProjectSortKey[] = ['name', 'status', 'age', 'cpu', 'memory', 'node'];
 
@@ -503,6 +509,19 @@ function persistStored(key: string, value: string): void {
     window.localStorage.setItem(key, value);
   } catch {
     /* storage unavailable — selection just won't persist */
+  }
+}
+
+function readStoredRefreshInterval(): number {
+  try {
+    const raw = window.localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
+    // Missing or blank: fall back to the default. Number(null) is 0, which
+    // would wrongly select "Off" and stop background refreshes on first load.
+    if (raw === null || raw.trim() === '') return DEFAULT_REFRESH_INTERVAL_SECONDS;
+    const v = Number(raw);
+    return REFRESH_INTERVAL_SECONDS.includes(v) ? v : DEFAULT_REFRESH_INTERVAL_SECONDS;
+  } catch {
+    return DEFAULT_REFRESH_INTERVAL_SECONDS;
   }
 }
 
@@ -783,6 +802,7 @@ export function OverviewPage() {
   const [sortKey, setSortKey] = useState<ProjectSortKey | null>(readStoredSortKey);
   const [sortDir, setSortDir] = useState<1 | -1>(readStoredSortDir);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(readStoredFilter);
+  const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState<number>(readStoredRefreshInterval);
   const [portsSortKey, setPortsSortKey] = useState<PortsSortKey | null>(readStoredPortsSortKey);
   const [portsSortDir, setPortsSortDir] = useState<1 | -1>(readStoredPortsSortDir);
   const [portsHeight, setPortsHeight] = useState(PORTS_DEFAULT_HEIGHT);
@@ -865,16 +885,26 @@ export function OverviewPage() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     void load(true).then(() => {});
+  }, [load]);
+
+  // Background refresh follows the interval picker; "Off" disables it.
+  useEffect(() => {
+    if (refreshIntervalSeconds <= 0) return;
+    let cancelled = false;
     const timer = window.setInterval(() => {
       if (!cancelled) void load(false);
-    }, 15000);
+    }, refreshIntervalSeconds * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [load]);
+  }, [load, refreshIntervalSeconds]);
+
+  const handleRefreshIntervalChange = useCallback((seconds: number) => {
+    setRefreshIntervalSeconds(seconds);
+    persistStored(REFRESH_INTERVAL_STORAGE_KEY, String(seconds));
+  }, []);
 
   const runOp = useCallback(async (w: Workload, op: 'deploy' | 'delete') => {
     if (!w.projectId) {
@@ -1102,9 +1132,12 @@ export function OverviewPage() {
         title="Dashboard"
         description="Live projects, ports, resource usage and nodes."
         actions={
-          <Button variant="secondary" onClick={() => void load(false)} disabled={refreshing} aria-label="Refresh dashboard" data-ref="page-overview-refresh">
-            <RefreshCw size={16} aria-hidden="true" /> {refreshing ? 'Refreshing…' : 'Refresh'}
-          </Button>
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void load(false)}
+            intervalSeconds={refreshIntervalSeconds}
+            onIntervalChange={handleRefreshIntervalChange}
+          />
         }
       />
 
