@@ -721,6 +721,28 @@ a {
   app-region: no-drag;
 }
 
+/* Desktop login title bar (Electron only): same frameless controls as the
+   main header, pinned top-right so the sign-in view can be
+   minimized / maximized / closed and dragged like the rest of the app. */
+.login-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  background-color: var(--bg-surface);
+  z-index: 50;
+}
+
+.electron .login-titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+
 /* ---- Tabs (shadcn-style) ---- */
 .tabs-list {
   display: inline-flex;

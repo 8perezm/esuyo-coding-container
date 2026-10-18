@@ -3,6 +3,7 @@
  * Kill leftover GUI dev servers by port.
  *
  *   npm run dev:kill
+ *   npm run dev-stop   # alias for dev:kill
  *
  * `npm run dev` already stops its children on Ctrl+C, but orphaned servers
  * (closed terminal, crashed launcher) keep holding their ports and the next
