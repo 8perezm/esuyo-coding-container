@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Maximize2, Minimize2, Plus, RotateCcw, X } from 'lucide-react';
+import { ClipboardPaste, Copy, Maximize2, Minimize2, Plus, RotateCcw, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -47,6 +47,76 @@ function stateDotColor(state: ConnState | undefined): string {
 interface SessionHandle {
   reconnect: () => void;
   refit: () => void;
+  copy: () => Promise<boolean>;
+  paste: () => Promise<boolean>;
+}
+
+/**
+ * Best-effort clipboard write that works outside secure contexts.
+ * navigator.clipboard.writeText needs HTTPS/localhost + permission; the
+ * textarea + execCommand fallback covers plain-HTTP LAN hosts where the
+ * async API is unavailable or denied.
+ */
+async function writeToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the execCommand fallback below */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', 'true');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Clipboard read for toolbar/menu paste. Keyboard paste uses the paste event (no permission needed). */
+async function readFromClipboard(): Promise<string | null> {
+  try {
+    if (navigator.clipboard?.readText) {
+      return await navigator.clipboard.readText();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Decode an OSC 52 (remote copy-to-clipboard) payload: `Pc ; base64`.
+ * Returns the decoded text, or null for queries, clears and junk.
+ * Full-screen apps (multiplexers, editors) push their own selection this
+ * way; without a handler that text never reaches the local clipboard.
+ */
+function decodeOsc52(data: string): string | null {
+  const semi = data.indexOf(';');
+  if (semi === -1) return null;
+  const payload = data.slice(semi + 1).replace(/\s+/g, '');
+  if (!payload || payload === '?') return null;
+  if (payload.length > 1400000) return null; // ~1 MB cap against clipboard bombs
+  try {
+    const bin = atob(payload);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 interface TerminalTab {
@@ -87,10 +157,30 @@ function SshTerminalPane({
 
   const [connState, setConnState] = useState<ConnState>('connecting');
   const [connMessage, setConnMessage] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [clipMsg, setClipMsg] = useState<string | null>(null);
+  const [pendingRemote, setPendingRemote] = useState<string | null>(null);
+  const clipTimer = useRef<number | null>(null);
 
   useEffect(() => {
     onConnChange(tabId, connState, connMessage);
   }, [tabId, connState, connMessage, onConnChange]);
+
+  const showClipMsg = useCallback((message: string) => {
+    setClipMsg(message);
+    if (clipTimer.current !== null) window.clearTimeout(clipTimer.current);
+    clipTimer.current = window.setTimeout(() => {
+      setClipMsg(null);
+      clipTimer.current = null;
+    }, 2200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (clipTimer.current !== null) window.clearTimeout(clipTimer.current);
+    },
+    [],
+  );
 
   // Fit the grid to the container. Wraps the fit addon with a correction:
   // the addon's scrollbar allowance can read 0 in this layout, leaving
@@ -208,12 +298,89 @@ function SshTerminalPane({
     connect(attempt);
   }, [connect]);
 
+  // Copy the current xterm selection. Uses the async clipboard API when the
+  // browser grants it, otherwise falls back to a hidden textarea so plain-HTTP
+  // hosts (no secure context) still work. Inside full-screen apps the app
+  // itself captures the mouse, so there is no local selection unless the user
+  // holds Shift while dragging (xterm force-selection bypass).
+  const copySelection = useCallback(async (): Promise<boolean> => {
+    const term = termRef.current;
+    if (!term) return false;
+    if (!term.hasSelection()) {
+      showClipMsg('Nothing selected — drag to select (hold Shift inside full-screen apps)');
+      return false;
+    }
+    const text = term.getSelection();
+    const ok = await writeToClipboard(text);
+    showClipMsg(
+      ok ? 'Copied to clipboard' : 'Copy blocked — allow clipboard access in the browser',
+    );
+    return ok;
+  }, [showClipMsg]);
+
+  // Remote copy: full-screen apps push their own selection via OSC 52. OSC
+  // sequences arrive without a user gesture, so the browser may deny the
+  // write — in that case keep the text and let one click on the notice
+  // (a real gesture) complete the copy.
+  const handleRemoteCopy = useCallback(
+    async (text: string): Promise<void> => {
+      if (!text) return;
+      const ok = await writeToClipboard(text);
+      if (ok) {
+        setPendingRemote(null);
+        showClipMsg('Copied from the terminal app to clipboard');
+      } else {
+        setPendingRemote(text);
+        showClipMsg('Terminal app copied — click here to save it to the clipboard');
+      }
+    },
+    [showClipMsg],
+  );
+
+  const confirmRemoteCopy = useCallback(async (): Promise<boolean> => {
+    if (!pendingRemote) return false;
+    const ok = await writeToClipboard(pendingRemote);
+    if (ok) {
+      setPendingRemote(null);
+      showClipMsg('Copied from the terminal app to clipboard');
+    } else {
+      showClipMsg('Copy still blocked — allow clipboard access, then press Copy');
+    }
+    return ok;
+  }, [pendingRemote, showClipMsg]);
+
+  // Paste from the clipboard button / context menu. Keyboard paste (Ctrl+V,
+  // Ctrl+Shift+V, Cmd+V, Shift+Insert) arrives via the paste event below so
+  // it never needs clipboard-read permission.
+  const pasteFromClipboard = useCallback(async (): Promise<boolean> => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showClipMsg('Not connected — cannot paste yet');
+      return false;
+    }
+    const text = await readFromClipboard();
+    if (text == null) {
+      showClipMsg('Paste blocked — focus the terminal and press Ctrl+V');
+      termRef.current?.focus();
+      return false;
+    }
+    if (!text) return false;
+    try {
+      ws.send(text);
+    } catch {
+      showClipMsg('Paste failed — connection lost');
+      return false;
+    }
+    termRef.current?.focus();
+    return true;
+  }, [showClipMsg]);
+
   useEffect(() => {
-    registerHandle(tabId, { reconnect, refit: refitAndNotify });
+    registerHandle(tabId, { reconnect, refit: refitAndNotify, copy: copySelection, paste: pasteFromClipboard });
     return () => {
       registerHandle(tabId, null);
     };
-  }, [tabId, reconnect, refitAndNotify, registerHandle]);
+  }, [tabId, reconnect, refitAndNotify, copySelection, pasteFromClipboard, registerHandle]);
 
   // Terminal lifecycle: create once, reconnect on demand.
   useEffect(() => {
@@ -224,6 +391,7 @@ function SshTerminalPane({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      rightClickSelectsWord: true,
       theme: {
         background: '#18181b',
         foreground: '#f4f4f5',
@@ -241,6 +409,67 @@ function SshTerminalPane({
     attemptRef.current = attempt;
     connect(attempt);
 
+    // Copy/paste shortcuts. Copy never needs permission-gated reads; paste
+    // via the keyboard arrives as a paste event (no clipboard permission),
+    // so the key handler only swallows the control code here.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const key = e.key?.toLowerCase();
+      if (e.key === 'Insert' && e.ctrlKey && !e.shiftKey) {
+        if (!term.hasSelection()) return true;
+        void copySelection();
+        return false;
+      }
+      if ((e.ctrlKey || e.metaKey) && key === 'c') {
+        if (e.shiftKey || e.metaKey) {
+          void copySelection();
+          return false;
+        }
+        if (term.hasSelection()) {
+          void copySelection();
+          return false;
+        }
+        return true;
+      }
+      if (e.key === 'Insert' && e.shiftKey) return false;
+      if ((e.ctrlKey || e.metaKey) && key === 'v') return false;
+      return true;
+    });
+
+    const onPaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text');
+      if (!text) return;
+      e.preventDefault();
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(text);
+        } catch {
+          /* onclose will surface the failure */
+        }
+      }
+    };
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      setMenu({
+        x: Math.min(e.clientX - rect.left, Math.max(rect.width - 170, 0)),
+        y: Math.min(e.clientY - rect.top, Math.max(rect.height - 90, 0)),
+      });
+    };
+    container.addEventListener('paste', onPaste as EventListener);
+    container.addEventListener('contextmenu', onContextMenu);
+
+    // OSC 52: remote copy-to-clipboard from full-screen apps. Without this
+    // the app's own "copied" notice fires but nothing reaches the local
+    // clipboard (the sequence would otherwise be swallowed silently).
+    const osc52 = term.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52(data);
+      if (text == null) return false;
+      void handleRemoteCopy(text);
+      return true;
+    });
+
     const disposable = term.onData((data) => {
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -255,6 +484,9 @@ function SshTerminalPane({
     return () => {
       attemptRef.current += 1;
       disposable.dispose();
+      osc52.dispose();
+      container.removeEventListener('paste', onPaste as EventListener);
+      container.removeEventListener('contextmenu', onContextMenu);
       const ws = wsRef.current;
       wsRef.current = null;
       try {
@@ -266,7 +498,7 @@ function SshTerminalPane({
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [projectId, connect, refitAndNotify]);
+  }, [projectId, connect, refitAndNotify, copySelection, handleRemoteCopy]);
 
   // The container has no size while hidden, so refit once it becomes visible.
   useEffect(() => {
@@ -293,12 +525,119 @@ function SshTerminalPane({
       ref={containerRef}
       style={
         fillHeight
-          ? { flex: 1, minHeight: 0, background: '#18181b', padding: 8 }
-          : { height: 480, background: '#18181b', padding: 8 }
+          ? { flex: 1, minHeight: 0, background: '#18181b', padding: 8, position: 'relative' }
+          : { height: 480, background: '#18181b', padding: 8, position: 'relative' }
       }
       data-ref="page-project-ssh-terminal"
       data-tab-id={tabId}
-    />
+      onClick={() => {
+        if (menu) setMenu(null);
+      }}
+    >
+      {menu && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            role="menu"
+            aria-label="Terminal clipboard"
+            data-ref="page-project-ssh-context-menu"
+            style={{
+              position: 'absolute',
+              left: menu.x,
+              top: menu.y,
+              zIndex: 41,
+              minWidth: 168,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 8,
+              boxShadow: 'var(--shadow-dropdown)',
+              padding: 4,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-ref="page-project-ssh-context-copy"
+              onClick={() => {
+                setMenu(null);
+                void copySelection();
+              }}
+              style={{
+                display: 'flex',
+                width: '100%',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 10px',
+                border: 0,
+                background: 'transparent',
+                cursor: 'pointer',
+                borderRadius: 6,
+                fontSize: 'var(--font-size-md)',
+              }}
+            >
+              <Copy size={14} aria-hidden="true" /> Copy selection
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-ref="page-project-ssh-context-paste"
+              onClick={() => {
+                setMenu(null);
+                void pasteFromClipboard();
+              }}
+              style={{
+                display: 'flex',
+                width: '100%',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 10px',
+                border: 0,
+                background: 'transparent',
+                cursor: 'pointer',
+                borderRadius: 6,
+                fontSize: 'var(--font-size-md)',
+              }}
+            >
+              <ClipboardPaste size={14} aria-hidden="true" /> Paste
+            </button>
+          </div>
+        </>
+      )}
+      {clipMsg && (
+        <div
+          role="status"
+          data-ref="page-project-ssh-clipboard-msg"
+          onClick={() => {
+            if (pendingRemote) void confirmRemoteCopy();
+          }}
+          title={pendingRemote ? 'Click to save the copied text to the clipboard' : undefined}
+          style={{
+            position: 'absolute',
+            left: 16,
+            bottom: 16,
+            zIndex: 30,
+            background: 'rgba(24, 24, 27, 0.92)',
+            color: '#f4f4f5',
+            border: '1px solid var(--border-color)',
+            borderRadius: 8,
+            padding: '6px 10px',
+            fontSize: 'var(--font-size-md)',
+            maxWidth: 'calc(100% - 32px)',
+            cursor: pendingRemote ? 'pointer' : 'default',
+          }}
+        >
+          {clipMsg}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -316,6 +655,7 @@ export function SshTerminalPage() {
   const [activeId, setActiveId] = useState('tab-1');
   const [tabStates, setTabStates] = useState<Record<string, { state: ConnState; message: string | null }>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copyHintOpen, setCopyHintOpen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
   const activeIdRef = useRef(activeId);
@@ -402,6 +742,14 @@ export function SshTerminalPage() {
 
   const reconnectActive = useCallback(() => {
     handlesRef.current.get(activeId)?.reconnect();
+  }, [activeId]);
+
+  const copyActive = useCallback(() => {
+    void handlesRef.current.get(activeId)?.copy();
+  }, [activeId]);
+
+  const pasteActive = useCallback(() => {
+    void handlesRef.current.get(activeId)?.paste();
   }, [activeId]);
 
   const toggleFullscreen = useCallback(async () => {
@@ -685,6 +1033,64 @@ export function SshTerminalPage() {
               {fullscreenError}
             </span>
           )}
+          <span
+            style={{ position: 'relative', display: 'inline-flex', flex: 'none' }}
+            data-ref="page-project-ssh-copy-wrap"
+            onMouseEnter={() => setCopyHintOpen(true)}
+            onMouseLeave={() => setCopyHintOpen(false)}
+            onFocus={() => setCopyHintOpen(true)}
+            onBlur={() => setCopyHintOpen(false)}
+          >
+            <Button
+              variant="secondary"
+              onClick={copyActive}
+              data-ref="page-project-ssh-copy"
+              aria-label="Copy terminal selection"
+              aria-describedby="ssh-copy-hint"
+              title="Copy selection (Ctrl+Shift+C, or Ctrl+C when text is selected; hold Shift to select inside full-screen apps)"
+              style={{ padding: '6px 8px', flex: 'none' }}
+            >
+              <Copy size={16} aria-hidden="true" />
+            </Button>
+            {copyHintOpen && (
+              <span
+                role="tooltip"
+                id="ssh-copy-hint"
+                data-ref="page-project-ssh-clipboard-hint"
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  minWidth: 220,
+                  maxWidth: 300,
+                  padding: '8px 10px',
+                  whiteSpace: 'normal',
+                  backgroundColor: 'var(--text-primary)',
+                  color: 'var(--bg-card)',
+                  borderRadius: 6,
+                  fontSize: 'var(--font-size-xs)',
+                  lineHeight: 1.5,
+                  zIndex: 10,
+                  pointerEvents: 'none',
+                  boxShadow: 'var(--shadow-dropdown)',
+                }}
+              >
+                Drag to select, then Copy or right-click. Inside full-screen apps hold
+                Shift while dragging — otherwise the app captures the mouse and there
+                is nothing to copy. Apps can also copy directly to your clipboard.
+              </span>
+            )}
+          </span>
+          <Button
+            variant="secondary"
+            onClick={pasteActive}
+            data-ref="page-project-ssh-paste"
+            aria-label="Paste into terminal"
+            title="Paste (Ctrl+V or right-click > Paste)"
+            style={{ padding: '6px 8px', flex: 'none' }}
+          >
+            <ClipboardPaste size={16} aria-hidden="true" />
+          </Button>
           <Button
             variant="secondary"
             onClick={addTab}

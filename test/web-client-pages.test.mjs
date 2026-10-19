@@ -255,4 +255,36 @@ describe('SshTerminalPage tabs contract', () => {
       'navigating between projects must reset to a single fresh tab',
     );
   });
+
+  it('supports copy/paste without clipboard permission (shortcuts, menu, toolbar)', () => {
+    assert.ok(terminal.includes('page-project-ssh-copy'), 'missing toolbar copy button');
+    assert.ok(terminal.includes('page-project-ssh-paste'), 'missing toolbar paste button');
+    assert.ok(terminal.includes('page-project-ssh-context-menu'), 'missing right-click menu');
+    assert.ok(terminal.includes('page-project-ssh-context-copy'), 'missing menu copy item');
+    assert.ok(terminal.includes('page-project-ssh-context-paste'), 'missing menu paste item');
+    assert.ok(terminal.includes('getSelection'), 'copy must read the xterm selection');
+    assert.ok(terminal.includes('execCommand'), 'copy must fall back when the async clipboard API is denied');
+    assert.ok(terminal.includes('attachCustomKeyEventHandler'), 'must intercept copy/paste keys');
+    assert.ok(terminal.includes("addEventListener('paste'"), 'keyboard paste must use the paste event (no permission needed)');
+    assert.ok(terminal.includes("addEventListener('contextmenu'"), 'right-click must open the clipboard menu');
+  });
+
+  it('bridges remote copy (OSC 52) and Shift-drag selection in full-screen apps', () => {
+    assert.ok(terminal.includes('registerOscHandler(52'), 'must handle OSC 52 remote copy requests');
+    assert.ok(terminal.includes('decodeOsc52'), 'must decode the OSC 52 base64 payload');
+    assert.ok(terminal.includes('pendingRemote'), 'denied remote copies must wait for a click gesture');
+    assert.ok(terminal.includes('confirmRemoteCopy'), 'clicking the notice must retry the pending remote copy');
+    assert.ok(
+      terminal.includes('page-project-ssh-clipboard-hint'),
+      'must hint that full-screen apps capture the mouse (hold Shift to select)',
+    );
+    assert.ok(
+      terminal.includes('page-project-ssh-copy-wrap'),
+      'hint must live in a popover on the copy button, not as a bar row',
+    );
+    assert.ok(
+      terminal.includes('role="tooltip"'),
+      'copy hint must render as a tooltip popover',
+    );
+  });
 });
