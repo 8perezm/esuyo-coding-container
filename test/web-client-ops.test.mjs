@@ -101,6 +101,31 @@ describe('JobsPage contract', () => {
     assert.match(jobs, /EmptyState/);
     assert.match(jobs, /No jobs yet/);
   });
+
+  it('renders detail inline below the selected row (not at the page bottom)', () => {
+    assert.match(jobs, /page-jobs-detail-row/);
+    assert.match(jobs, /colSpan=\{6\}/);
+    assert.match(jobs, /aria-expanded/);
+    assert.match(jobs, /aria-controls/);
+    // toggling the same row collapses it again
+    assert.match(jobs, /prev === job\.id \? null : job\.id/);
+    // closing stays closed: polling must not auto-select the first job
+    assert.ok(!jobs.includes('list[0].id'), 'closing a row must stay closed, not re-open the first job');
+    // no detached bottom card and no inner card box: detail lives flat in the row
+    assert.ok(!jobs.includes('marginTop: 24'), 'detail must not render as a detached bottom card');
+    assert.ok(!jobs.includes('page-jobs-detail-card'), 'detail must not use an inner card box');
+    const tbody = jobs.slice(jobs.indexOf('<TBody>'));
+    assert.ok(
+      tbody.indexOf('page-jobs-detail-heading') > 0 &&
+        tbody.indexOf('page-jobs-detail-heading') < tbody.indexOf('</TBody>'),
+      'detail content must render inside <TBody>',
+    );
+    assert.ok(
+      tbody.indexOf('page-jobs-detail-logs') > 0 &&
+        tbody.indexOf('page-jobs-detail-logs') < tbody.indexOf('</TBody>'),
+      'detail logs must render inside <TBody>',
+    );
+  });
 });
 
 describe('App routes for setup/jobs (no standalone gc page)', () => {

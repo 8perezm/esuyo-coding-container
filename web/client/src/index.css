@@ -7,6 +7,7 @@
   --font-brand: 'Patua One', Georgia, serif;
   --font-heading: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-terminal: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-size-brand: 26px;
 
   /* Central type scale — change these values to resize text globally.
@@ -22,6 +23,9 @@
   --font-size-3xl: 18px;
   --font-size-4xl: 20px;
   --font-size-5xl: 24px;
+
+  /* Terminal type (Theme page `--font-terminal-size`, default 14px) */
+  --font-terminal-size: 14px;
 
   /* Grayscale ramp (light) */
   --gray-50: #fafafa;
@@ -671,6 +675,174 @@ a {
 
 .icon-button:hover {
   background-color: var(--bg-row-hover);
+}
+
+/* ---- Theme page (font family + size pickers) ---- */
+.theme-role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.theme-divider {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 20px 0;
+}
+
+.font-picker {
+  position: relative;
+}
+
+.font-picker-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+}
+
+.font-picker-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 15px;
+}
+
+.font-picker-badge {
+  flex: none;
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  padding: 1px 8px;
+}
+
+.font-picker-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-card);
+  box-shadow: var(--shadow-dropdown);
+  overflow: hidden;
+}
+
+.font-picker-search {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-md);
+}
+
+.font-picker-opts {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.font-picker-group {
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 8px 12px 2px;
+}
+
+.font-picker-opt {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.font-picker-opt:last-child {
+  border-bottom: 0;
+}
+
+.font-picker-opt-active {
+  background-color: var(--accent-soft);
+}
+
+.font-picker-opt-name {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.font-picker-opt-cat {
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.font-picker-opt-prev {
+  font-size: var(--font-size-md);
+  color: var(--text-muted);
+}
+
+.font-mono-warn {
+  margin-top: 6px;
+  font-size: var(--font-size-sm);
+  color: #92400e;
+  background-color: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.theme-size-range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.theme-size-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.theme-size-line .input {
+  width: 110px;
+  flex: none;
+}
+
+.theme-term-preview {
+  background-color: #18181b;
+  color: #f4f4f5;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: var(--font-terminal);
+  font-size: var(--font-terminal-size);
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+@media (max-width: 700px) {
+  .theme-role-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---- Refresh control (Dashboard header: manual refresh + interval picker) ---- */

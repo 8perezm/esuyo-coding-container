@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronUp, LogOut, PencilLine, UserRound } from 'lucide-react';
+import { ChevronUp, LogOut, Palette, PencilLine, UserRound } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
-type MenuId = 'edit' | 'logout';
+type MenuId = 'edit' | 'theme' | 'logout';
 
 const MENU_ITEMS: Array<{ id: MenuId; label: string; hint: string }> = [
   { id: 'edit', label: 'Edit profile', hint: 'Change display name and password' },
+  { id: 'theme', label: 'Theme', hint: 'Change fonts and font sizes' },
   { id: 'logout', label: 'Log off', hint: 'End session' },
 ];
 
@@ -42,6 +43,8 @@ export function ProfileBlock() {
     setOpen(false);
     if (id === 'edit') {
       navigate('/profile');
+    } else if (id === 'theme') {
+      navigate('/theme');
     } else {
       await logout();
       navigate('/login', { replace: true });
@@ -101,6 +104,8 @@ export function ProfileBlock() {
             >
               {item.id === 'edit' ? (
                 <PencilLine size={16} aria-hidden="true" />
+              ) : item.id === 'theme' ? (
+                <Palette size={16} aria-hidden="true" />
               ) : (
                 <LogOut size={16} aria-hidden="true" />
               )}

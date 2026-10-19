@@ -61,12 +61,12 @@ esuyo-coding-container/
 │       ├── package.json    # separate install/lockfile (npm --prefix web/client install); scripts: dev/build/preview
 │       ├── vite.config.ts  # dev :3400 + /api proxy (incl. websockets) at VITE_API_TARGET (default 127.0.0.1:3401)
 │       └── src/
-│           ├── App.tsx     # routes (/login, /register, /, /projects..., /images, /system, /ssh-keys, /setup, /jobs, /profile)
+│           ├── App.tsx     # routes (/login, /register, /, /projects..., /images, /system, /ssh-keys, /setup, /jobs, /profile, /theme)
 │           ├── auth/       # AuthContext + RequireAuth/LoginPage (session-cookie flow)
 │           ├── lib/        # api.ts (same-origin fetch client), projects.tsx, systemJobs.ts
 │           ├── components/ # layout (Sidebar/Header/Layout/ProfileBlock/ThemeToggle), ui kit, JobOutput, ValidatePanel, YamlEditor, ProjectDeployTab
-│           ├── pages/      # Dashboard, Projects (+ new/import/edit), Images, System, SSH keys, Setup, Jobs, Profile, SSH terminal, placeholders
-│           └── theme/      # useTheme (dark/light)
+│           ├── pages/      # Dashboard, Projects (+ new/import/edit), Images, System, SSH keys, Setup, Jobs, Profile, Theme, SSH terminal, placeholders
+│           └── theme/      # useTheme (dark/light), fonts (per-browser font + size settings)
 └── electron/               # installable desktop shell around the unchanged web GUI + CLI
     ├── package.json        # private package; version kept in sync with the root one; dev/pack/dist scripts
     ├── electron-builder.yml# packaging (no asar; bundles main/preload/launcher + src + web/server + client dist + config/Dockerfile + prod node_modules)

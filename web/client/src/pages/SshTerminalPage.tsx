@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { api } from '../lib/api';
 import { useProjects } from '../lib/projects';
+import { FONT_SETTINGS_EVENT, fontCss, readFontFamily, readFontSize } from '../theme/fonts';
 import {
   Button,
   Card,
@@ -389,8 +390,8 @@ function SshTerminalPane({
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontSize: readFontSize('terminal'),
+      fontFamily: fontCss(readFontFamily('terminal')),
       rightClickSelectsWord: true,
       theme: {
         background: '#18181b',
@@ -499,6 +500,32 @@ function SshTerminalPane({
       fitRef.current = null;
     };
   }, [projectId, connect, refitAndNotify, copySelection, handleRemoteCopy]);
+
+  // Live-apply Theme page terminal font/size changes to open sessions.
+  useEffect(() => {
+    const onFontsChanged = () => {
+      const term = termRef.current;
+      if (!term) return;
+      const nextFamily = fontCss(readFontFamily('terminal'));
+      const nextSize = readFontSize('terminal');
+      let changed = false;
+      if (term.options.fontFamily !== nextFamily) {
+        term.options.fontFamily = nextFamily;
+        changed = true;
+      }
+      if (term.options.fontSize !== nextSize) {
+        term.options.fontSize = nextSize;
+        changed = true;
+      }
+      if (changed) refitAndNotify();
+    };
+    window.addEventListener(FONT_SETTINGS_EVENT, onFontsChanged);
+    window.addEventListener('storage', onFontsChanged);
+    return () => {
+      window.removeEventListener(FONT_SETTINGS_EVENT, onFontsChanged);
+      window.removeEventListener('storage', onFontsChanged);
+    };
+  }, [refitAndNotify]);
 
   // The container has no size while hidden, so refit once it becomes visible.
   useEffect(() => {

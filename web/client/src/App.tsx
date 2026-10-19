@@ -13,6 +13,7 @@ import { ProjectImportPage } from './pages/ProjectImportPage';
 import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ThemePage } from './pages/ThemePage';
 import { SystemPage } from './pages/SystemPage';
 import { SshKeysPage } from './pages/SshKeysPage';
 import { SetupPage } from './pages/SetupPage';
@@ -56,6 +57,7 @@ export function App() {
             />
             <Route path="images" element={<ImagesPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="theme" element={<ThemePage />} />
             <Route path="system" element={<SystemPage />} />
             <Route path="ssh-keys" element={<SshKeysPage />} />
             <Route path="setup" element={<SetupPage />} />

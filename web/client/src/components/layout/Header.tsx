@@ -34,7 +34,7 @@ export function Header({ theme, onToggleTheme, onOpenSidebar }: HeaderProps) {
         >
           <Menu size={22} aria-hidden="true" />
         </button>
-        <Link to="/" className="brand" data-ref="header-brand-link" style={{ fontSize: 'var(--font-size-4xl)' }}>
+        <Link to="/" className="brand" data-ref="header-brand-link">
           Coding Containers
         </Link>
       </div>
