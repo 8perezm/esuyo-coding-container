@@ -452,7 +452,8 @@ function SshTerminalPane({
     };
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      const rect = container.getBoundingClientRect();
+      const outer = container.parentElement ?? container;
+      const rect = outer.getBoundingClientRect();
       setMenu({
         x: Math.min(e.clientX - rect.left, Math.max(rect.width - 170, 0)),
         y: Math.min(e.clientY - rect.top, Math.max(rect.height - 90, 0)),
@@ -549,18 +550,38 @@ function SshTerminalPane({
 
   return (
     <div
-      ref={containerRef}
       style={
         fillHeight
-          ? { flex: 1, minHeight: 0, background: '#18181b', padding: 8, position: 'relative' }
-          : { height: 480, background: '#18181b', padding: 8, position: 'relative' }
+          ? {
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#18181b',
+              padding: 2,
+              position: 'relative',
+              overflow: 'hidden',
+            }
+          : {
+              height: 480,
+              background: '#18181b',
+              padding: 8,
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }
       }
-      data-ref="page-project-ssh-terminal"
-      data-tab-id={tabId}
       onClick={() => {
         if (menu) setMenu(null);
       }}
     >
+      <div
+        ref={containerRef}
+        style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}
+        data-ref="page-project-ssh-terminal"
+        data-tab-id={tabId}
+      />
       {menu && (
         <>
           <div
@@ -889,7 +910,18 @@ export function SshTerminalPage() {
       <div
         ref={fullscreenTargetRef}
         data-ref="page-project-ssh-fullscreen-target"
-        style={isFullscreen ? { display: 'flex', flexDirection: 'column', height: '100%' } : undefined}
+        style={
+          isFullscreen
+            ? {
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100vh',
+                width: '100%',
+                background: '#18181b',
+                overflow: 'hidden',
+              }
+            : undefined
+        }
       >
       <Card
         style={

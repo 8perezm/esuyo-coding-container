@@ -287,4 +287,19 @@ describe('SshTerminalPage tabs contract', () => {
       'copy hint must render as a tooltip popover',
     );
   });
+
+  it('measures the terminal in a padding-free box so full-screen rows are not clipped', () => {
+    // The xterm fit addon sizes the grid from the container's client size, so
+    // padding on the measured element overestimates rows and leaves the last
+    // line half visible. The measured box must carry no padding; the 8px
+    // visual padding lives on the outer wrapper.
+    assert.ok(
+      terminal.includes("style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}"),
+      'measured terminal box must be padding-free with flex:1/minHeight:0',
+    );
+    assert.ok(
+      terminal.includes('100vh'),
+      'full-screen target must size to the viewport (100vh), not a percentage of its parent',
+    );
+  });
 });
