@@ -218,3 +218,80 @@ test("setup provisions an LF-only Dockerfile", async () => {
     fs.rmSync(stubDir, { recursive: true, force: true });
   }
 });
+
+test("repo Dockerfile defaults to Node 26 with npm-installed corepack", () => {
+  // Regression test: Node 25+ no longer ships corepack, so a bare
+  // `corepack enable` fails with exit 127 (seen on the Node 26 bump).
+  const content = fs.readFileSync(REPO_DOCKERFILE, "utf8");
+  assert.ok(
+    content.includes("ARG NODE_VERSION=26"),
+    "expected the default Node version to be 26"
+  );
+  assert.ok(
+    content.includes("npm install -g corepack@latest"),
+    "expected corepack to be installed via npm before `corepack enable`"
+  );
+});
+
+test("setup renders NODE_VERSION 26 and provisions opencode defaults", async () => {
+  const prevKubectl = process.env.KUBECTL_BIN;
+  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "dockerfile-opencode-stub-"));
+  try {
+    const stub = path.join(stubDir, "kubectl-stub.js");
+    fs.writeFileSync(stub, "process.exit(0);\n");
+    process.env.KUBECTL_BIN = stub;
+    // Pre-seed the key pair so setup() never shells out to ssh-keygen.
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, "coding-container");
+    const keysDir = path.join(globalDir, "keys");
+    fs.mkdirSync(keysDir, { recursive: true });
+    fs.writeFileSync(path.join(keysDir, "id_ed25519"), "dummy-private");
+    fs.writeFileSync(path.join(keysDir, "id_ed25519.pub"), "dummy-public");
+
+    await setup({
+      registry: "reg.example.com/you",
+      nfsServer: "10.0.0.5",
+      nfsBasePath: "/workspaces",
+      namespace: "coding",
+    });
+
+    const cfgText = fs.readFileSync(path.join(globalDir, "config.yaml"), "utf8");
+    assert.ok(
+      cfgText.includes('NODE_VERSION: "26"'),
+      "fresh global config must default to Node 26"
+    );
+    for (const rel of [
+      "opencode/opencode.json",
+      "opencode/cli.json",
+      "opencode/esuyo-opencode-custom-provider.json",
+    ]) {
+      const file = path.join(globalDir, rel);
+      assert.ok(fs.existsSync(file), `setup must provision ${rel}`);
+      const text = fs.readFileSync(file, "utf8");
+      assert.ok(!text.includes("\r"), `${rel} must be LF-only`);
+    }
+    const agentDir = path.join(globalDir, "opencode", "agent");
+    assert.ok(
+      fs.existsSync(path.join(agentDir, "orchestrator.md")),
+      "setup must provision the default opencode agents"
+    );
+
+    // Re-running setup must not overwrite user edits to opencode files.
+    const cliFile = path.join(globalDir, "opencode", "cli.json");
+    fs.writeFileSync(cliFile, '{"edited":true}\n');
+    await setup({
+      registry: "reg.example.com/you",
+      nfsServer: "10.0.0.5",
+      nfsBasePath: "/workspaces",
+      namespace: "coding",
+    });
+    assert.equal(
+      fs.readFileSync(cliFile, "utf8"),
+      '{"edited":true}\n',
+      "existing opencode files must be left untouched"
+    );
+  } finally {
+    if (prevKubectl === undefined) delete process.env.KUBECTL_BIN;
+    else process.env.KUBECTL_BIN = prevKubectl;
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  }
+});

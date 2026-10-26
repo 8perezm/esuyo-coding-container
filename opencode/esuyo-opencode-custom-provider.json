@@ -1,0 +1,32 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "defaults": {
+        "npm": "@ai-sdk/openai-compatible",
+        "timeoutMs": 8000,
+        "modelDefaults": {
+            "modalities": {
+                "input": [
+                    "text",
+                    "image",
+                    "video"
+                ],
+                "output": [
+                    "text"
+                ]
+            },
+            "attachment": true,
+            "limit": {
+                "context": 256000,
+                "output": 32000
+            }
+        }
+    },
+    "providers": {
+        "esuyo-gateway": {
+            "name": "Esuyo Gateway",
+            "baseURL": "https://ai-gateway.foo.esuyo.com/v1",
+            "apiKey": "{env:ESUYO_GATEWAY_API_KEY}",
+            "enabled": true
+        }
+    }
+}

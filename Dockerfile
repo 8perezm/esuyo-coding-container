@@ -12,7 +12,7 @@
 ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=26
 ARG EXTRA_APT_PACKAGES=""
 ARG EXTRA_NPM_PACKAGES=""
 ARG INSTALL_PLAYWRIGHT=true
@@ -44,7 +44,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 # pre-fetched versions is still downloaded on first use. Pre-fetch the
 # current pnpm/yarn (incl. pnpm's native binary, pulled on first run) at
 # build time so first use inside a pod is offline-fast.
-RUN corepack enable \
+# NOTE: Node 25+ no longer ships corepack, so install it via npm first.
+RUN npm install -g corepack@latest \
+    && corepack enable \
     && corepack prepare pnpm@latest --activate \
     && corepack prepare yarn@latest --activate \
     && pnpm --version >/dev/null \
@@ -61,13 +63,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Coding agents / CLIs ---------------------------------------------------
-# opencode v2 (installer adds PATH for interactive shells only; ENV + profile.d
+# opencode (V2 installer replaces the V1 binary; installer adds PATH for interactive shells only; ENV + profile.d
 # cover non-interactive shells and login shells)
-RUN curl -fsSL https://opencode.ai/v2/install | bash && /root/.opencode/bin/opencode --version
+RUN curl -fsSL https://opencode.ai/v2/install | bash
 ENV PATH="/root/.opencode/bin:${PATH}"
 RUN printf 'export PATH="/root/.opencode/bin:$PATH"\n' > /etc/profile.d/opencode.sh
-# pi (pi.dev)
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+# pi (pi.dev) - npm method per https://pi.dev/docs/latest/quickstart (installer
+# is interactive; npm is Docker-friendly). Requires Node >=22.19 (we install Node 26.x above).
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
+    && pi --version
 # herdr (https://herdr.dev) - terminal multiplexer/runtime for coding agents.
 # Install to /usr/local/bin so it's on PATH for all shells incl. sshd sessions.
 RUN curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh \
@@ -116,6 +120,23 @@ ENTRYPOINT
 
 # --- Workspace --------------------------------------------------------------
 RUN mkdir -p /workspace
+
+# --- pi config --------------------------------------------------------------
+# Pre-create the default agent dir (~/.pi/agent) so tools like Herdr don't
+# warn about a missing extensions folder on first run. Pi creates these
+# lazily, so an empty dir is the correct "installed properly" state.
+RUN mkdir -p /root/.pi/agent/extensions /root/.pi/agent/skills /root/.pi/agent/prompts /root/.pi/agent/themes
+
+# --- opencode config (v2) -----------------------------------------------------
+# Server config (opencode.json) + terminal config (cli.json) + custom provider
+# options + global agents. Note: v2 no longer reads tui.json (replaced by the
+# single global cli.json); the tui.json source file is kept only for rollback.
+RUN mkdir -p /root/.config/opencode
+COPY opencode/opencode.json /root/.config/opencode/opencode.json
+COPY opencode/cli.json /root/.config/opencode/cli.json
+COPY opencode/esuyo-opencode-custom-provider.json /root/.config/opencode/esuyo-opencode-custom-provider.json
+COPY opencode/agent /root/.config/opencode/agents
+
 WORKDIR /workspace
 # Land in /workspace on every interactive login
 RUN printf '\ncd /workspace 2>/dev/null || cd ~\n' >> /root/.bashrc \

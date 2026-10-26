@@ -1,0 +1,51 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+        "servers": {
+            "playwright": {
+                "type": "local",
+                "command": [
+                    "npx",
+                    "-y",
+                    "@playwright/mcp@latest",
+                    "--isolated",
+                    "--no-sandbox"
+                ],
+                "disabled": false
+            },
+            "chrome-devtools": {
+                "type": "local",
+                "command": [
+                    "npx",
+                    "-y",
+                    "chrome-devtools-mcp@latest",
+                    "--isolated",
+                    "--headless",
+                    "--chrome-arg=--no-sandbox",
+                    "--chrome-arg=--disable-setuid-sandbox"
+                ]
+            }
+        }
+    },
+    "providers": {},
+    "permissions": [
+        {
+            "action": "external_directory",
+            "resource": "/tmp",
+            "effect": "allow"
+        },
+        {
+            "action": "external_directory",
+            "resource": "/tmp/*",
+            "effect": "allow"
+        },
+        {
+            "action": "external_directory",
+            "resource": "/tmp/**",
+            "effect": "allow"
+        }
+    ],
+    "plugins": [
+        "@esuyo/esuyo-opencode-custom-provider"
+    ]
+}

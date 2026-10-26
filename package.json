@@ -37,6 +37,7 @@
   "files": [
     "src/",
     "Dockerfile",
+    "opencode/",
     "config.yaml"
   ],
   "dependencies": {

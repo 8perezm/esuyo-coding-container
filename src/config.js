@@ -44,7 +44,7 @@ export const DEFAULTS = {
     context: ".",
     buildArgs: {
       BASE_IMAGE: "ubuntu:26.04",
-      NODE_VERSION: "22",
+      NODE_VERSION: "26",
       EXTRA_APT_PACKAGES: "",
       EXTRA_NPM_PACKAGES: "",
     },

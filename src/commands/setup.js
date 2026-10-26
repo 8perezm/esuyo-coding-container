@@ -102,7 +102,7 @@ image:
   context: .
   buildArgs:
     BASE_IMAGE: ubuntu:26.04
-    NODE_VERSION: "22"
+    NODE_VERSION: "26"
     EXTRA_APT_PACKAGES: ""
     EXTRA_NPM_PACKAGES: ""
 
@@ -183,6 +183,46 @@ function provisionDockerfile(dir) {
   }
 }
 
+// Copy the default opencode config (opencode.json, cli.json, custom provider,
+// agents) from the repo into the global folder so the Dockerfile's
+// COPY opencode/... steps have a build context on first install. Existing
+// files are never overwritten (per-file, so user edits survive updates that
+// add new default files). Copies are normalized to Unix (LF) line endings.
+function provisionOpencode(dir) {
+  const srcRoot = path.join(PROJECT_ROOT, "opencode");
+  if (!fs.existsSync(srcRoot)) return;
+  const dstRoot = path.join(dir, "opencode");
+  const walk = (rel) => {
+    const srcDir = path.join(srcRoot, rel);
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const relEntry = path.join(rel, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(path.join(dstRoot, relEntry), { recursive: true });
+        walk(relEntry);
+      } else if (entry.isFile()) {
+        const src = path.join(srcRoot, relEntry);
+        const dst = path.join(dstRoot, relEntry);
+        if (fs.existsSync(dst)) {
+          const existing = fs.readFileSync(dst, "utf8");
+          if (existing.includes("\r")) {
+            fs.writeFileSync(dst, existing.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+            console.log(`normalized: ${dst} (converted CRLF to LF)`);
+          } else {
+            console.log(`kept:    ${dst} (already exists, left untouched)`);
+          }
+        } else {
+          fs.mkdirSync(path.dirname(dst), { recursive: true });
+          const content = fs.readFileSync(src, "utf8").replaceAll("\r\n", "\n");
+          fs.writeFileSync(dst, content);
+          console.log(`created: ${dst} (copied from the repo)`);
+        }
+      }
+    }
+  };
+  fs.mkdirSync(dstRoot, { recursive: true });
+  walk("");
+}
+
 // Ask for one environment value. A flag wins; otherwise an interactive prompt
 // (only on a real TTY); otherwise a clearly-marked placeholder. Never blocks
 // when run non-interactively.
@@ -256,6 +296,7 @@ export async function setup(opts = {}) {
   fs.mkdirSync(dir, { recursive: true });
 
   provisionDockerfile(dir);
+  provisionOpencode(dir);
 
   const cfgFile = globalConfigPath();
   if (fs.existsSync(cfgFile)) {
