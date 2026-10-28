@@ -1,76 +1,62 @@
 # Shared global image
 
-How the team-shared image is versioned, published, rolled back, and cleaned up.
+How the team shared image is versioned, published, rolled back, and cleaned up.
 
-Projects run in one of two image modes, decided by the *project* config:
+You do all of this on the Images and System pages. There is no file to edit by hand. Pick a project if the page asks for context, press a button, and follow the job log.
 
-- **Global mode (the default):** the project does not set `image.dockerfile`, `image.buildArgs` or `image.name`. Every such project runs one team-shared image, `image.registry/image.name:tag` (e.g. `registry.example.com/you/coding-container:v1.1.0`), versioned with human semver tags (`v1.0.0`, `v1.1.0`, ...). Deploys **float** on the version the cluster currently points at, so no config edit is needed when a new version is published.
-- **Custom mode:** the project sets any of `image.dockerfile` / `image.buildArgs` / `image.name`. The project builds + pushes its own image, `image.registry/coding-<project>` (or `image.name` if set), and `image.tag` is **required** (it pins the exact version the project deploys).
+Projects run in one of two image modes, decided by the project config:
 
-The cluster is the source of truth for the global image: a ConfigMap named `coding-system` in `k8s.namespace` (default `coding`) holds the state (all strings):
+* **Global mode, the default:** the project does not set `image.dockerfile`, `image.buildArgs` or `image.name`. Every such project runs one team shared image, `image.registry/image.name:tag`, for example `registry.example.com/you/coding-container:v1.1.0`, versioned with human tags such as `v1.0.0` and `v1.1.0`. Deploys float on the version the cluster currently points at, so no config edit is needed when a new version is published.
+* **Custom mode:** the project sets any of `image.dockerfile`, `image.buildArgs` or `image.name`. The project builds and pushes its own image, `image.registry/coding-<project>` or `image.name` when set, and `image.tag` is required because it pins the exact version the project deploys.
+
+The cluster is the source of truth for the global image. A ConfigMap named `coding-system` in `k8s.namespace`, default `coding`, holds the state. All values are strings:
 
 | Key | Meaning |
 |---|---|
-| `current` | what global-mode deploys float on |
-| `previous` | last version `current` had before its last change (the default rollback target; may be absent) |
-| `maxEver` | highest version ever published; never moves backward, so a rolled-back (poisoned) version can never be republished |
-| `keep` | gc window: how many versions behind `current` to keep |
+| `current` | what global mode deploys float on |
+| `previous` | last version `current` had before its last change, the default roll back target, may be absent |
+| `maxEver` | highest version ever published, never moves backward, so a rolled back version can never be republished |
+| `keep` | cleanup window, how many versions behind `current` to keep |
 
-Run the `system` commands from a global-mode project (or the repo root):
+## Publish and manage versions in the app
 
-```sh
-# One-time bootstrap on a fresh cluster (fails if the ConfigMap exists):
-coding-container system init --tag v1.0.0
+Open the Images page:
 
-# Inspect / list:
-coding-container system get             # current/previous/maxEver/keep + resolved image
-coding-container system list            # the global repo's tags, semver-sorted
+* **Versions tab:** shows current, previous, max ever and keep, the resolved image, and the tag list newest first. Tags marked current or previous are easy to spot.
+* **Publish tab:** type a tag or leave it empty to bump max ever patch by one, then press Publish new version. The app builds plus pushes the image, then repoints previous to current and current to the new tag. Custom mode projects are refused here with a clear message.
+* **Roll back tab:** leave the tag empty to return to previous, or type a specific existing tag, then press Roll back. This only moves pointers. There is no build, push or delete. Max ever never moves and previous becomes the old current.
+* **Cleanup tab:** press Preview with dry run on to see the plan, then Run GC to prune. The keep field is optional. Empty means use the server value shown on the page.
 
-# Publish a new version (the only writer of the global image):
-coding-container system create --tag v1.1.0
-# builds + pushes coding-container:v1.1.0, then repoints:
-#   previous = current, current = v1.1.0, maxEver = v1.1.0
-# The tag must be semver, not exist in the registry yet, and be greater than maxEver.
+Open the System page for first time init and for the global config:
 
-# Roll back (pure pointer change, no build, push or delete):
-coding-container system rollback        # back to 'previous'
-coding-container system rollback v1.0.0 # back to a specific existing version
-# Rollback swaps the pointers: current -> target, previous -> old current.
-# maxEver never moves. The target must be semver and exist in the registry.
+* **System init card:** run once per fresh cluster. Type the starting tag such as `v1.0.0` and a keep count, then press Initialize system. This only creates the ConfigMap. Publish the first real image from the Images page after that, with a tag above the init tag. That is what projects start floating on.
+* **State summary:** the same current, previous, max ever and keep values.
+* **Global configuration:** YAML editor for the shared settings with validation. Saving affects every project, so read the warning on the card.
 
-# Prune old versions:
-coding-container system gc --dry-run
-```
+Notes that help day to day:
 
-Notes:
+* After publish or roll back, existing projects pick the new version up on their next Deploy, with no config changes and no rebuilds on the project side.
+* Global mode tags use semver. Custom mode tags can be free form but are required.
+* To run your project on a specific global version instead of floating, pin it with `image.tag` in the project editor.
 
-- `system init` only creates the ConfigMap (no image is built); the first real image is published with `system create --tag <a version greater than the init tag>`, and that is what projects start floating on.
-- After any `system create` or `rollback`, existing projects pick the new version up on their next `deploy`/`create`, with no config changes and no re-builds on the projects' side.
-- Global-mode tags must be semver; custom-mode tags are free-form but required.
-- To run your project on a specific global version (instead of floating), pin it with `image.tag` in the project config or `--tag`.
+## Cleaning up old images
 
-## Garbage-collecting old images
+Images accumulate tags over time, one per published version for the shared repo and one per build for custom repos. Both use the same safety rules.
 
-Global images accumulate one tag per published version; custom images one per build. Two commands prune them, with the same safety rules:
+On the Images page use the Cleanup tab for the shared repo. On a project page use its cleanup action for a custom repo.
 
-```sh
-coding-container gc             # custom repo: keep the pinned tag + 5 versions behind it
-coding-container gc --keep 10   # wider window
-coding-container gc --dry-run   # preview only
-coding-container system gc --dry-run   # global repo
-```
+A tag is never deleted when it is any of:
 
-A tag is **never** deleted if it is any of:
+* **In use:** referenced by a `coding-container=true` deployment in the namespace, looked up live. When that lookup fails, cleanup refuses to delete anything.
+* **The pin:** the project `image.tag` for custom repos, or the ConfigMap `current` for the shared repo.
+* **`previous`:** the ConfigMap last version, shared repo only.
+* **Within the keep window:** the newest keep semver versions behind the pin or current.
 
-- **In use:** referenced by a `coding-container=true` deployment in the namespace (queried live via `kubectl`; if that query fails, gc refuses to delete anything).
-- **The pin:** the project's `image.tag` (custom), or the ConfigMap's `current` (global).
-- **`previous`:** the ConfigMap's last version (global only).
-- **Within the keep window:** the newest `--keep` (or ConfigMap `keep`) semver versions behind the pin/current.
-
-Everything else is deleted, oldest first. Non-semver tags (e.g. `latest` or legacy timestamp tags) are never counted in the keep window, they are deleted unless in use or literally the pin/`current` (every `gc` run reports them separately, not just dry runs). Deleting a tag frees disk space only once the registry runs its own garbage collection, which is automatic on GitLab/Harbor, or `registry garbage-collect` on a bare Docker registry. Note that AWS ECR does not expose tag deletion through the standard registry API, so gc cannot prune ECR-hosted images.
+Everything else is deleted oldest first. Tags that are not semver, such as `latest` or older timestamp tags, never count in the keep window. They are deleted unless in use or exactly the pin or current. Every run reports them separately, including previews. Deleting a tag frees disk only once the registry runs its own cleanup, which is automatic on GitLab and Harbor, or `registry garbage-collect` on a plain Docker registry. Note that AWS ECR does not expose tag deletion through the standard registry API, so cleanup cannot prune ECR hosted images.
 
 ## See also
 
-- [Configuration](./configuration.md): global vs. project config
-- [CLI reference](./cli-reference.md): full `system` and `gc` flags
-- [Architecture](./architecture.md): how the ConfigMap float and registry client work
+- [Configuration](./configuration.md) for global and project config
+- [Web GUI](./gui.md) for Images, System and Jobs pages
+- [Terminal use](./cli-reference.md) for the same tasks from a prompt
+- [Architecture](./architecture.md) for how the ConfigMap float and registry client work

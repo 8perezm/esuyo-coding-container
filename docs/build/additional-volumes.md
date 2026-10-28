@@ -131,9 +131,9 @@ kubectl -n coding exec deploy/<project> -- touch /data/should-fail  # readOnly c
 ## 5. Rollout / compatibility
 
 - Backward compatible: default `[]` renders today's manifest byte-for-byte.
-- Apply with `coding-container deploy` (or `create`); removal of an entry from
-  the config + redeploy unmounts it. Data on the NAS is never deleted by this
-  feature (`delete` already leaves NAS contents alone).
+- Apply with the Deploy button on the project page; removal of an entry from
+  the config plus Deploy again unmounts it. Data on the NAS is never deleted by this
+  feature (project removal already leaves NAS contents alone).
 - Failure modes unchanged: missing `nfs.basePath` on the NAS →
   `ContainerCreating` (existing troubleshooting applies per subPath).
 

@@ -16,8 +16,8 @@ Give users with no private registry a pull-and-deploy path:
   optionally Playwright).
 * Built images published to a public registry (GHCR primary, Docker Hub optional
   mirror) with semver tags.
-* Users opt in purely via config (`image.registry / image.name / image.tag`);
-  no CLI changes, no changes to root `Dockerfile`, `src/`, or existing docs flow.
+* Users opt in purely via config (`image.registry`, `image.name`, `image.tag`);
+  no app changes, no changes to root `Dockerfile`, `src`, or existing docs flow.
 
 Non-goals:
 
@@ -28,35 +28,35 @@ Non-goals:
 
 ## 2. Design decisions
 
-* **Additive only.** `setup` copies only root `Dockerfile`; `build/push/deploy`
+* **Additive only.** Setup copies only root `Dockerfile`. Build, push and deploy
   never look at `public-images/`. Existing hermetic tests (`npm test`) ignore it.
 * **One subfolder per variant.** e.g. `public-images/base-ubuntu/`,
   `public-images/devcontainer-base/`, each self-contained with its own
   Dockerfile + README snippet. If Microsoft renames a base tag, only that
   variant breaks.
-* **Reuse the SSH contract from the main image.** Same expectations so `deploy`,
-  `ssh`, and VS Code Remote-SSH keep working unchanged:
+* **Reuse the SSH contract from the main image.** Same expectations so Deploy,
+  Terminal, and VS Code Remote SSH keep working unchanged:
   sshd on 22, key-only auth, `authorized_keys` placeholder path, `/workspace`
   workdir, `/entrypoint.sh` recreating `/run/sshd` (tmpfs-safe).
   Decide root vs `vscode` user per variant (see §6); default recommendation is
   stay `root` for v1 to keep manifest/SSH identical.
 * **Full vs slim is really about Playwright.** Size guidance (from current image):
-  opencode / pi / herdr / turbo are small (tens of MB each), include by default
-  for parity. Node + build-essential + headers + clients are medium (hundreds of
-  MB), keep for dev parity. Playwright + Chromium with deps is huge
-  (600MB–1GB+) and dominates build time, pull time, and node disk. So:
-  `full` = parity including Playwright, `slim` = identical minus Playwright
-  (equivalent to `INSTALL_PLAYWRIGHT=false` today). Both share most layers so
+  opencode, pi, herdr and turbo are small at tens of MB each, include by default
+  for parity. Node plus build tools plus headers plus clients are medium at hundreds of
+  MB, keep for dev parity. Playwright plus Chromium with deps is huge
+  at about six hundred MB to more than a GB and dominates build time, pull time, and node disk. So:
+  `full` is parity including Playwright, `slim` is identical minus Playwright
+  (same as `INSTALL_PLAYWRIGHT=false` today). Both share most layers so
   hosting both costs little extra on the registry.
-* **Minimal devcontainer base.** Prefer `base:ubuntu`-class minimal bases over
-  `universal` (~2GB before our layers). Otherwise full+universal stacks to 3–4GB
-  and kills the slim story.
+* **Minimal devcontainer base.** Prefer small ubuntu class minimal bases over
+  `universal` at about 2 GB before our layers. Otherwise full plus universal stacks to 3 to 4 GB
+  and hurts the slim story.
 * **Registry: GHCR primary.** Free public hosting, no anonymous pull rate limits,
   Actions publishes with `GITHUB_TOKEN`. Docker Hub optional mirror for
-  discoverability only. Tags follow the repo's existing `vX.Y.Z` semver so
-  `system list / rollback / gc` mental model still applies if a team floats on
+  discoverability only. Tags follow the repo semver so
+  the Images page Versions, Roll back and Cleanup mental model still applies if a team floats on
   the public image.
-* **Multi-arch from day one.** Build `amd64+arm64`; Kubernetes clusters are often mixed
+* **Many arch from day one.** Build `amd64` plus `arm64`; Kubernetes clusters are often mixed
   or Pi-based, devcontainer bases already are.
 
 ## 3. Changes, file by file (when implemented, not now)
@@ -72,7 +72,7 @@ Non-goals:
   out of context, mirroring the root packaging gotcha.
 * `.github/workflows/publish-public-images.yaml` (new): matrix over variants ×
   (full/slim), buildx multi-arch, push to `ghcr.io/<org>/coding-<variant>:vX.Y.Z`
-  (+ `:latest` only if deliberately wanted; note current CLI has no `latest`
+  (+ `:latest` only if deliberately wanted; note the app has no `latest`
   fallback, explicit tag required). Sign with cosign / provenance.
 * `README.md` (edit, small): one short "No registry? Use prebuilt community
   images → see `public-images/`" section next to Installation/Prerequisites.
@@ -88,12 +88,12 @@ Non-goals:
 * `docker run -d -p 2222:22` + `ssh -i <key> -p 2222 root@localhost` smoke test:
   lands in `/workspace`, `node --version`, `opencode --version`, `pi --version`,
   `herdr --version` present; slim variant asserts `playwright` absent.
-* Render check without cluster: `coding-container validate --manifest` with a
+* Render check without cluster: Manifest preview in the project editor with a
   project config pointing `image.registry` at the public repo. Manifest image
   ref resolves, no pull-secret failure blocks deploy (warning only).
-* End-to-end (needs Kubernetes, once): `create` + `ssh` + `deploy` against public tag;
+* End-to-end (needs Kubernetes, once): Deploy plus Terminal plus redeploy against public tag;
   confirm `ImagePullBackOff` does not occur with no pull secret configured.
-* Registry API sanity: `system list` / `gc --dry-run` equivalents against GHCR
+* Registry API sanity: Images page Versions plus Cleanup preview equivalents against GHCR
   (and Docker Hub if mirrored). V2 `tags/list` + auth flow both work; Docker
   Hub `library/` namespace quirks checked before promising Hub support.
 
@@ -101,11 +101,11 @@ Non-goals:
 
 * Backward compatible: default flow untouched; public images are purely an
   alternative `image.registry/name/tag` value.
-* Removal risk: none. Deleting `public-images/` changes nothing about the CLI.
+* Removal risk: none. Deleting `public-images/` changes nothing about the app or its background tasks.
 * Custom-mode users still need their own registry for their own builds; document
   that `public-images` covers the shared/global use case only.
-* Disk/GC: public repos accumulate tags like private ones; document that global
-  `system gc` semantics apply if a team shares the public stream.
+* Disk/GC: public repos accumulate tags like private ones; document that shared
+  cleanup on the Images page applies if a team shares the public stream.
 
 ## 6. Open questions
 

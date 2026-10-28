@@ -1,37 +1,29 @@
-# Web access (Traefik Ingress)
+# Web access with Traefik Ingress
 
-How to reach dev servers in the browser without port-forwards.
+How to reach dev servers in the browser with no port forwards.
 
-List the container ports you need in `web.ports`; each host in an entry (a `hosts` list, or a single `host`) gets an Ingress rule that routes to that port on the project's service. The rule is rendered with `ingress.className` (default `traefik`, bundled with many Kubernetes distributions) and is applied on every `deploy`:
+List the container ports you need in `web.ports` in the project editor. Each host in an entry gets an Ingress rule that routes to that port on the project service. The rule uses `ingress.className`, default `traefik` bundled with many Kubernetes distributions, and it is applied on the next Deploy.
 
 ```yaml
 project: my-webapp
 
 web:
   ports:
-    - { port: 3000, hosts: [my-webapp.example.com, www.example.com] } # e.g. Vite/Next
+    - { port: 3000, hosts: [my-webapp.example.com, www.example.com] } # for example Vite or Next
     - { port: 8080, host: my-api.example.com, name: api } # optional explicit port name
-    - { port: 5173, host: my-vite.example.com, nodePort: 30080 } # + optional NodePort
+    - { port: 5173, host: my-vite.example.com, nodePort: 30080 } # plus optional NodePort
 ```
 
-- **You choose the hosts.** Nothing is hardcoded. Each `web.ports` entry points one or more domains (`hosts: [...]`, or a single `host`) at the same container port, so several names can share port `3000`. Use as many entries as you have ports.
-- **DNS is on you.** Each host must resolve (A/AAAA record, wildcard, or hosts entry) to your Traefik LoadBalancer IP. The CLI does not manage DNS.
-- **Optional NodePort per port.** An entry's `nodePort` (30000–32767) additionally exposes that port on every cluster node, so the app is also reachable at `http://<node-ip>:<nodePort>/`, useful when the Ingress hosts don't resolve from your machine. The port must be unique across the SSH NodePort, `web.ports`, and sidecar `nodePort`s; `deploy` checks the cluster for conflicts before applying and prints the resulting URL.
-- After `deploy` the CLI prints the resulting URLs.
+* **You choose the hosts.** Nothing is hardcoded. Each entry points one or more domains at the same container port, so several names can share port `3000`. Use as many entries as you have ports.
+* **DNS is on you.** Each host must resolve with an A or AAAA record, a wildcard, or a hosts entry to your Traefik LoadBalancer IP. The app does not manage DNS.
+* **Optional NodePort per port.** An entry `nodePort` in 30000 to 32767 also exposes that port on every cluster node, so the app is also reachable at `http://<node-ip>:<nodePort>/`. This helps when the Ingress hosts do not resolve from your machine. The port must be unique across the SSH NodePort, `web.ports`, and sidecar `nodePort` entries. The app checks the cluster for conflicts before applying and prints the resulting address.
+* After you press Deploy, the project deploy panel and the Jobs log show the resulting URLs, for example the Ingress hosts with the container port in brackets.
 
-```sh
-$ coding-container create
-Deployed my-webapp in coding
-Web (Traefik Ingress):
-  http://my-webapp.example.com/  (container port 3000)
-  http://www.example.com/  (container port 3000)
-  http://my-api.example.com/  (container port 8080)
-```
-
-`delete` removes the Ingress along with the deployment, service and configmap.
+Removing the project removes the Ingress along with the deployment, service and config map.
 
 ## See also
 
-- [Configuration](./configuration.md): where `web.ports` lives in the config
-- [Sidecars](./sidecars.md): exposing sidecar ports over HTTP or NodePort
-- [Troubleshooting](./troubleshooting.md): web app unreachable checklist
+- [Configuration](./configuration.md) for where `web.ports` lives in the config
+- [Sidecars](./sidecars.md) for exposing sidecar ports over HTTP or NodePort
+- [Troubleshooting](./troubleshooting.md) for the web app unreachable checklist
+- [Web GUI](./gui.md) for the project editor with manifest preview

@@ -7,6 +7,7 @@ on:
       - master
     paths-ignore:
       - 'README.md'
+      - '**/*.md'
       - 'assets/**'
       - 'docs/**'
   workflow_dispatch:

@@ -1,14 +1,14 @@
-![coding-container — Standardized, isolated coding environments.](./docs/intro-image.jpg)
+![coding-container, standardized, isolated coding environments.](./docs/intro-image.jpg)
 
 # coding-container
 
-> Ready-to-code containers on your Kubernetes cluster — per project, over SSH, with workspaces that survive restarts.
+> Ready to code containers on your Kubernetes cluster, per project, with workspaces that keep your work.
 
-`coding-container` gives every project its own consistent coding environment on Kubernetes. One deploy puts an SSH-accessible container per project at your fingertips: you land in `/workspace`, backed by your NAS so work survives restarts. The default image is just a starting point (Ubuntu, Node.js, and common dev tools); the Dockerfile is yours to customize with any language or toolchain, plus optional sidecars for databases and queues.
+`coding-container` gives every project its own consistent coding environment on Kubernetes. You open the app, add a project, press Deploy, and land in `/workspace` backed by your NAS so work survives restarts. The default image starts with Ubuntu, Node.js, and common dev tools. The Dockerfile is yours to change for any language or toolchain, with optional sidecars for databases and queues.
 
-Work your way: the terminal workflow, a browser admin UI (dashboard, project editor, terminal in the browser, job history), or the installable desktop app that wraps the same UI. All three share one project registry, so a project created in one place shows up in the others.
+Use it in the browser or in the installable desktop app. Both show the same projects, images, and jobs. The desktop app wraps the same pages in a window with encrypted sign in and automatic updates. Pick the one you like. They stay in sync through one shared registry on your machine.
 
-For private, internal Kubernetes clusters only. Do not expose to the public web. Every project opens NodePorts on all cluster nodes (SSH plus optional web/sidecar ports) and serves Ingress hosts without authentication or TLS by default. Only run this on a trusted internal network (homelab, LAN, or VPN-gated cluster) behind a firewall. See [Architecture](./docs/architecture.md#security-notes) for details.
+For private, internal Kubernetes clusters only. Do not expose to the public web. Every project opens NodePorts on all cluster nodes with SSH plus optional web and sidecar ports, and serves Ingress hosts without auth or TLS by default. Only run this on a trusted internal network such as a homelab, LAN, or VPN gated cluster behind a firewall. See [Architecture](./docs/architecture.md#security-notes) for details.
 
 <table>
   <tr>
@@ -23,65 +23,73 @@ For private, internal Kubernetes clusters only. Do not expose to the public web.
 
 ## Features
 
-- One deploy for a ready-to-code container, SSH in, and tear down when done
-- Kubernetes-native: Deployment, Service, Ingress, ConfigMap, and Secret manifests applied with `kubectl`
-- Persistent per-project workspace on your NAS, so files survive restarts
-- Dedicated SSH key; VS Code Remote-SSH ready
-- Optional browser access to dev servers and sidecars for databases and queues
-- Shared team image with versioning, or a custom image per project. Bring your own Dockerfile for any language or toolchain
-- Browser admin UI: dashboard with live workload status, project editor with validation, terminal in the browser, image publishing, and a job log for every operation
-- Desktop app (Windows / macOS / Linux): the same UI in an installable window with encrypted sign-in and automatic updates
-- Shared project registry, so the terminal, browser, and desktop views stay in sync
+* One Deploy press for a ready to code container, with removal when done
+* Kubernetes native: Deployment, Service, Ingress, ConfigMap, and Secret applied for you
+* Persistent per project workspace on your NAS, so files survive restarts
+* SSH alias per project, ready for VS Code Remote SSH and for the browser terminal
+* Optional browser access to dev servers and sidecars for databases and queues
+* Shared team image with versioning, or a custom image per project, with your own Dockerfile for any language or toolchain
+* Browser pages: dashboard with live workload status, project editor with checks, terminal in the browser, image publishing, and a job log for every task
+* Desktop app for Windows, macOS, and Linux: the same pages in an installable window with encrypted sign in and automatic updates
+* Shared project registry, so the browser and desktop views stay in sync
 
 ## Prerequisites
 
-- A private, internal Kubernetes cluster (any CNCF-conformant distribution) with `kubectl` access. Do not use on a publicly exposed cluster
-- Node.js >= 18, Docker, `kubectl` on `PATH`
-- `docker login` to your container registry
-- OpenSSH (`ssh`, `ssh-keygen`)
-- Your NAS reachable from the cluster nodes
-- For the browser UI / desktop app: a sign-in (email + password) configured in the checkout `.env` file
+* A private, internal Kubernetes cluster with any conformant distribution and `kubectl` access. Do not use a publicly exposed cluster
+* Node.js 18 or newer, Docker, `kubectl` on PATH
+* `docker login` to your container registry
+* OpenSSH with `ssh` and `ssh-keygen`
+* Your NAS reachable from the cluster nodes
+* For sign in: an email and password you create on first launch in the app
 
 ## Installation
 
-Terminal workflow:
+Start with the desktop app when you can. It is the simplest path.
+
+**Desktop app:**
+
+Download an installer from the releases page and run it like any other app. Sign in once on first launch. The dashboard opens from then on, with sign in kept in the OS keychain. See [Desktop](./docs/desktop.md).
+
+To build from source:
 
 ```sh
-npm install -g @esuyo/coding-container
-coding-container --help
+npm --prefix web/client run build
+npm --prefix electron install
+npm --prefix electron run dist:win
 ```
 
-Or run from source:
+Use `dist:mac` on macOS and `dist:linux` on Linux. See [Desktop](./docs/desktop.md) for all targets.
+
+**Browser pages from source:**
 
 ```sh
-npm install
-npm link
-coding-container --help
+npm --prefix web/client install
+copy .env.example .env
+node web/dev.js
 ```
 
-`npm link` puts `coding-container` on your PATH. Prefer not to link globally? Run it with `node src/index.js ...` instead.
-
-One-time setup (creates your global config and SSH key, never overwrites):
+Use `cp .env.example .env` on macOS or Linux in place of `copy`. Then open the pages and create your sign in on the computer that runs the server.
 
 ```sh
-coding-container setup
+npm --prefix web/client run build
+node web/server/server.js
 ```
 
-Browser UI (from source):
+The first build line emits `web/client/dist`. The second serves the pages and the API together on one port. See [Web GUI](./docs/gui.md).
+
+The pages run on `:3400` in dev with the API on the `.env` `PORT`, default `3401`. Production serves both on the `.env` `PORT`.
+
+To stop orphaned dev servers that still hold the dev ports:
 
 ```sh
-npm --prefix web/client install   # first time only
-copy .env.example .env            # Windows (cp on macOS/Linux) — then set ADMIN_EMAIL + ADMIN_PASSWORD
-node web/dev.js                   # pages on :3400, API on the .env PORT
+node web/kill-dev.js
 ```
-
-Production build: `npm --prefix web/client run build`, then `node web/server/server.js` serves the pages and the API on one port. See [Web GUI](./docs/gui.md).
-
-Desktop app: download an installer from the releases page, or build one from source (`npm --prefix web/client run build`, `npm --prefix electron install`, `npm --prefix electron run dist:win`). See [Desktop](./docs/desktop.md).
 
 ## Configuration
 
-Two small YAML files drive everything: a global config for your environment (`~/.config/coding-container/config.yaml`) and a per-project `config.yaml` for what differs per project.
+Two small YAML files drive everything: a shared config for your environment at `~/.config/coding-container/config.yaml`, and a project `config.yaml` for what differs per project.
+
+You rarely edit these by hand. Open the Setup page to create the shared config, and open a project to edit its YAML with checks and a manifest preview.
 
 ```yaml
 project: my-project
@@ -89,35 +97,33 @@ k8s:
   nodePort: 30022
 ```
 
-Each checkout also carries its own identity in a `.env` file (copied from `.env.example`): separate config folders, connection-alias prefixes, and namespaces for isolated dev/prod instances, plus the browser UI sign-in and port.
+Each checkout carries its own identity in a `.env` file copied from `.env.example`: separate config folders, connection alias prefixes, and namespaces for isolated dev and prod instances, plus server settings like the app port. This file is not for project variables. Project values live in each project `config.yaml`, with secrets supplied as shell variables and referenced as `${NAME}`.
 
-See [Configuration](./docs/configuration.md) for layering, multiple projects, the shared registry, and NAS folders.
+See [Configuration](./docs/configuration.md) for layering, many projects, the shared registry, and NAS folders. See [Environment variables and secrets](./docs/env-and-secrets.md) for plain values plus secret handling.
 
 ## Quick Start
 
-Terminal workflow:
+1. Open the app and create your sign in when asked. On a new machine this is a create account form. On your own machine only.
+2. Open the Setup page. Fill in container registry, NFS server, and NFS base path. Press Run setup and follow the job on the Jobs page.
+3. On a fresh cluster, open the System page once and press Initialize system with a starting tag such as `v1.0.0`. Then open the Images page and press Publish new version.
+4. Open the Projects page, add a project, open it, and press Deploy. The Dashboard shows live status while it rolls out.
+5. Press Terminal on the project page to land in `/workspace`. Or connect VS Code Remote SSH to `coding-<project>` and open `/workspace`.
 
-```sh
-coding-container create   # deploy this project
-coding-container ssh      # connect, you land in /workspace
-coding-container delete   # remove cluster resources (files stay safe on the NAS)
-```
+For the full flow with checks and logs, see [Web GUI](./docs/gui.md). For Windows with K3s from scratch, see [Windows setup](./docs/windows-setup.md). For the browser terminal and VS Code, see [SSH and VS Code](./docs/ssh-and-vscode.md).
 
-Working in another folder? `cd` there and run `create`: a minimal `config.yaml` is scaffolded automatically. Each project gets its own container and workspace. Registered projects can be addressed from anywhere (`coding-container -p <name> deploy`).
+To stop a session, close the browser tab or type `exit` in the terminal. To remove a project, use Remove on the project row or project page and confirm. Files on the NAS stay safe.
 
-Browser UI: open the pages, sign in, and use the Dashboard for live status, Projects to add/edit/deploy (including a terminal per project), Images and System for the shared image, and Jobs for the log of every operation.
+To verify it works, the Dashboard row for your project reads Running, the Jobs page shows the deploy as done, and Terminal opens in `/workspace`.
 
-Desktop app: sign in once on first launch — the dashboard opens automatically from then on, with the sign-in kept in the OS keychain.
-
-For everything else (web URLs, databases, image versions, all commands and flags), see [CLI reference](./docs/cli-reference.md) and the guides below.
+If you prefer a shell on this machine for the same tasks, see [Terminal use](./docs/cli-reference.md). The app remains the primary path.
 
 ## Troubleshooting
 
-- **Missing registry or NAS settings?** Run `coding-container setup`.
-- **Push auth error?** Run `docker login <your-registry>` first.
-- **Pod stuck?** Usually NFS or image pull. See [Troubleshooting](./docs/troubleshooting.md).
-- **Can't sign in to the browser UI?** Set `ADMIN_EMAIL` + `ADMIN_PASSWORD` in `.env` and restart the server.
-- **Pages show "GUI not built"?** Run `npm --prefix web/client run build` first.
+* **Setup page says values are missing?** Fill in registry, NFS server, and base path, then press Run setup again.
+* **Push or publish reports auth trouble?** Run `docker login <your-registry>` first, then try again.
+* **Pod stuck?** Usually NFS or image pull. Open the Jobs log for the deploy, then see [Troubleshooting](./docs/troubleshooting.md).
+* **Cannot sign in?** Create the account on the computer that runs the server. Remote addresses cannot register on purpose. If you use an older `.env` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`, the server moves those into its credential file on first start.
+* **Pages show GUI not built?** Run `npm --prefix web/client run build` first, then restart the server.
 
 ## License
 
@@ -125,21 +131,22 @@ MIT. See [LICENSE](./LICENSE).
 
 ## Developer Documentation
 
-- [Web GUI](./docs/gui.md) — Pages, jobs, and server settings
-- [Desktop app](./docs/desktop.md) — Installable Electron shell
-- [Build & Deployment](./docs/build-and-deployment.md) — npm releases, GUI bundle, installers
-- [Configuration](./docs/configuration.md) — Config layering, multiple projects, NAS volumes
-- [Shared global image](./docs/global-image.md) — Team image versions, publishing, rollback, cleanup
-- [Web access](./docs/web-access.md) — Browser access to dev servers via Traefik
-- [Sidecars](./docs/sidecars.md) — Databases, queues, and other pod companions
-- [CLI reference](./docs/cli-reference.md) — All commands and flags
-- [SSH and VS Code](./docs/ssh-and-vscode.md) — Key rotation and Remote-SSH setup
-- [SSH image paste](./docs/ssh-image-paste.md) — Clipboard images into opencode over SSH
-- [Troubleshooting](./docs/troubleshooting.md) — Common failures and fixes
-- [Architecture](./docs/architecture.md) — Tech stack and system design
-- [Project Structure](./docs/project-structure.md) — Folder layout
-- [Development Guide](./docs/development.md) — Local setup for contributors
-- [App config & setup files](./docs/config-files.md) — Persisting tool configs via /workspace
-- [Windows setup](./docs/windows-setup.md) — Docker, kubectl, K3s, registry, and kubeconfig on Windows
-- [Plan: Additional NFS volumes](./docs/build/additional-volumes.md) — Design history for extra volumes
-- [Plan: Public prebuilt images](./docs/build/public-images.md) — Design history for public images
+* [Web GUI](./docs/gui.md), pages, jobs and server settings
+* [Desktop app](./docs/desktop.md), installable shell around the pages
+* [Build and Deployment](./docs/build-and-deployment.md), npm releases, GUI bundle and installers
+* [Configuration](./docs/configuration.md), config layering, many projects and NAS volumes
+* [Environment variables and secrets](./docs/env-and-secrets.md), plain values plus secret handling with shell variables
+* [Shared global image](./docs/global-image.md), team image versions, publishing, rollback and cleanup
+* [Web access](./docs/web-access.md), browser access to dev servers with Traefik
+* [Sidecars](./docs/sidecars.md), databases, queues and other pod companions
+* [Terminal use](./docs/cli-reference.md), optional shell path with all tasks from a prompt
+* [SSH and VS Code](./docs/ssh-and-vscode.md), key rotation and Remote SSH setup
+* [SSH image paste](./docs/ssh-image-paste.md), clipboard images into opencode over SSH
+* [Troubleshooting](./docs/troubleshooting.md), common failures and fixes
+* [Architecture](./docs/architecture.md), tech stack and system design
+* [Project Structure](./docs/project-structure.md), folder layout
+* [Development Guide](./docs/development.md), local setup for contributors
+* [App config and setup files](./docs/config-files.md), persisting tool configs with `/workspace`
+* [Windows setup](./docs/windows-setup.md), Docker, kubectl, K3s, registry and kubeconfig on Windows
+* [Plan: Additional NFS volumes](./docs/build/additional-volumes.md), design history for extra volumes
+* [Plan: Public prebuilt images](./docs/build/public-images.md), design history for public images
