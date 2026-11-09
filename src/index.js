@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Trigger for GitHub publish workflow (push to main runs publish.yml) – trigger 2.
+// Trigger for GitHub publish workflow (push to main runs publish.yml) – trigger 3.
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
