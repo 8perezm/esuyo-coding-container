@@ -79,9 +79,9 @@ describe('ImagesPage contract', () => {
     assert.match(images, /role="alert"/);
   });
 
-  it('shows the returned job id with a link to /jobs', () => {
+  it('shows the returned job id with a deep-link to /jobs?job=', () => {
     assert.match(images, /job\.id/);
-    assert.ok(images.includes('to="/jobs"'), 'missing link to /jobs');
+    assert.ok(images.includes('/jobs?job='), 'missing deep-link to /jobs?job=');
   });
 
   it('notes that custom-mode projects get a server refusal', () => {
@@ -137,10 +137,10 @@ describe('SystemPage contract', () => {
     assert.ok(system.includes('State summary'), 'missing state summary section');
   });
 
-  it('notes the global-mode requirement and shows job id with a link to /jobs', () => {
+  it('notes the global-mode requirement and shows job id with a deep-link to /jobs?job=', () => {
     assert.match(system, /global-mode/);
     assert.match(system, /job\.id/);
-    assert.ok(system.includes('to="/jobs"'), 'missing link to /jobs');
+    assert.ok(system.includes('/jobs?job='), 'missing deep-link to /jobs?job=');
   });
 });
 

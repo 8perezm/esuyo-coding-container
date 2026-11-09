@@ -117,17 +117,16 @@ function useJobDetail(jobId: string | null) {
 }
 
 function JobProgress({ job }: { job: JobResponse }) {
-  const { detail, detailError } = useJobDetail(job.id);
+  const { detail } = useJobDetail(job.id);
   const live = detail ?? job;
   const running = live.status === 'running';
-  const logs = (detail?.logs ?? detail?.logTail ?? '').trim();
   const liveExit = (live as Partial<JobDetail>).exitCode;
 
   return (
     <div data-ref="page-system-init-job-detail">
       <p data-ref="page-system-status-init-job" style={{ margin: '0 0 8px', fontSize: 'var(--font-size-md)' }}>
         {job.op} started: <code data-ref="page-system-init-job-id">{job.id}</code> ({job.status}) —{' '}
-        <Link data-ref="page-system-link-jobs" to="/jobs">View jobs</Link>
+        <Link data-ref="page-system-link-jobs" to={`/jobs?job=${encodeURIComponent(job.id)}`}>View jobs</Link>
       </p>
       <p style={{ margin: '0 0 8px', fontSize: 'var(--font-size-sm)' }}>
         <Badge tone={jobTone(live.status)}>{live.status}</Badge>
@@ -136,36 +135,6 @@ function JobProgress({ job }: { job: JobResponse }) {
         ) : liveExit !== null && liveExit !== undefined ? (
           <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>exit {liveExit}</span>
         ) : null}
-      </p>
-      {detailError ? (
-        <p data-ref="page-system-init-job-detail-error" role="alert" style={{ margin: '0 0 8px', fontSize: 'var(--font-size-md)' }}>
-          Could not load job output: {detailError}
-        </p>
-      ) : !detail ? (
-        <Spinner label="Loading job output…" />
-      ) : (
-        <pre
-          data-ref="page-system-init-job-detail-logs"
-          aria-label="Job logs"
-          style={{
-            margin: 0,
-            maxHeight: 400,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontSize: 'var(--font-size-sm)',
-            lineHeight: 1.5,
-            padding: 12,
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 8,
-          }}
-        >
-          {logs || '(no output yet)'}
-        </pre>
-      )}
-      <p data-ref="page-system-init-job-detail-status" style={{ margin: '8px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-        Status: {live.status}
       </p>
     </div>
   );

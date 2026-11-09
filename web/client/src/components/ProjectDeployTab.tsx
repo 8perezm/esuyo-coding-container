@@ -285,7 +285,7 @@ export function ProjectDeployTab({ project }: { project: Project }) {
       {result && (
         <Card data-ref="page-project-edit-deploy-result-card" style={{ marginTop: 16 }}>
           <p data-ref="page-project-edit-deploy-status-result" style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>
-            Job started: <code data-ref="page-project-edit-deploy-result-id">{result.id}</code> ({result.status}) — <Link data-ref="page-project-edit-deploy-link-jobs" to="/jobs">View jobs</Link>
+            Job started: <code data-ref="page-project-edit-deploy-result-id">{result.id}</code> ({result.status}) — <Link data-ref="page-project-edit-deploy-link-jobs" to={`/jobs?job=${encodeURIComponent(result.id)}`}>View jobs</Link>
           </p>
         </Card>
       )}

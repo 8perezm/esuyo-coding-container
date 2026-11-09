@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { jobTone } from '../pages/job-helpers';
-import { Badge, Spinner } from './ui';
+import { Badge } from './ui';
 
 export interface InlineJob {
   id: string;
@@ -65,32 +65,35 @@ export function useJobDetail(jobId: string | null) {
 }
 
 /**
- * Live job output rendered directly underneath the button that started it,
- * so users never have to visit /jobs to see what happened.
+ * Compact live job status rendered directly underneath the button that
+ * started it. Shows the started line plus a live status badge (polled every
+ * 2s) and a deep-link to /jobs for full logs — no inline log output, so the
+ * trigger area never expands with a log box.
  *
- * Polls GET /api/jobs/:id every 2s and renders status + argv + logs inline.
- * With `compact`, only the started line + status badge render (no logs,
- * footer, or exit code) — for rows where inline output is unwanted.
+ * Polls GET /api/jobs/:id every 2s and renders status + exit code inline.
+ * The `compact` prop is accepted for backwards compatibility and ignored:
+ * output is always compact.
  */
 export function JobOutput({
   job,
   onFinished,
   dataRef,
-  compact = false,
+  compact = true,
 }: {
   job: InlineJob;
   onFinished?: () => void;
   dataRef?: string;
   compact?: boolean;
 }) {
-  const { detail, detailError } = useJobDetail(job.id);
+  void compact;
+  const { detail } = useJobDetail(job.id);
   const [notified, setNotified] = useState(false);
 
   const live = detail ?? job;
   const running = live.status === 'running';
-  const logs = (detail?.logs ?? detail?.logTail ?? '').trim();
   const liveExit = (live as Partial<JobDetail>).exitCode;
   const prefix = dataRef ?? 'job-output';
+  const jobsTo = `/jobs?job=${encodeURIComponent(job.id)}`;
 
   useEffect(() => {
     if (detail && detail.status !== 'running' && !notified) {
@@ -104,50 +107,16 @@ export function JobOutput({
       <p data-ref={`${prefix}-status`} style={{ margin: '0 0 8px', fontSize: 'var(--font-size-md)' }}>
         {job.op ? `${job.op} started: ` : 'Job started: '}
         <code data-ref={`${prefix}-id`}>{job.id}</code> ({job.status}) —{' '}
-        <Link data-ref={`${prefix}-jobs-link`} to="/jobs">View jobs</Link>
+        <Link data-ref={`${prefix}-jobs-link`} to={jobsTo}>View jobs</Link>
       </p>
       <p style={{ margin: '0 0 8px', fontSize: 'var(--font-size-sm)' }}>
         <Badge tone={jobTone(live.status ?? '')}>{live.status}</Badge>
-        {!compact && running ? (
+        {running ? (
           <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>running, refreshing…</span>
-        ) : !compact && liveExit !== null && liveExit !== undefined ? (
+        ) : liveExit !== null && liveExit !== undefined ? (
           <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>exit {liveExit}</span>
         ) : null}
       </p>
-      {compact ? null : (
-        <>
-          {detailError ? (
-            <p data-ref={`${prefix}-error`} role="alert" style={{ margin: '0 0 8px', fontSize: 'var(--font-size-md)' }}>
-              Could not load job output: {detailError}
-            </p>
-          ) : !detail ? (
-            <Spinner label="Loading job output…" />
-          ) : (
-            <pre
-              data-ref={`${prefix}-logs`}
-              aria-label="Job logs"
-              style={{
-                margin: 0,
-                maxHeight: 400,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontSize: 'var(--font-size-sm)',
-                lineHeight: 1.5,
-                padding: 12,
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 8,
-              }}
-            >
-              {logs || '(no output yet)'}
-            </pre>
-          )}
-          <p data-ref={`${prefix}-footer`} style={{ margin: '8px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-            Status: {live.status}
-          </p>
-        </>
-      )}
     </div>
   );
 }

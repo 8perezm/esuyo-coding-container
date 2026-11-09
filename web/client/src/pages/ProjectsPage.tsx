@@ -384,11 +384,7 @@ export function ProjectsPage() {
             )}
           </span>
           {notice && (
-            <div style={{ marginTop: 8 }}>
-              <p style={{ margin: '8px 0 0', fontSize: 'var(--font-size-md)' }} data-ref="page-projects-row-job-notice" role="status">
-                Job started: <code>{notice.id}</code> ({notice.status}) —{' '}
-                <Link to="/jobs" data-ref="page-projects-row-job-notice-link">View jobs</Link>
-              </p>
+            <div style={{ marginTop: 8 }} data-ref="page-projects-row-job-notice" role="status">
               <JobOutput key={notice.id} job={{ id: notice.id, op: notice.op, status: notice.status }} dataRef="page-projects-row-job" />
             </div>
           )}

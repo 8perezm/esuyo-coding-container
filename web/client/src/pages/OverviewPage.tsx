@@ -1233,7 +1233,7 @@ export function OverviewPage() {
             <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
               Job <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{notice.id.slice(0, 8)}</code>
               {' '}· <Badge tone={notice.status === 'running' ? 'accent' : 'default'}>{notice.status}</Badge>
-              {' '}— <Link to="/jobs" data-ref="page-overview-notice-jobs-link">View jobs</Link>
+              {' '}— <Link to={`/jobs?job=${encodeURIComponent(notice.id)}`} data-ref="page-overview-notice-jobs-link">View jobs</Link>
             </p>
           </div>
           <button

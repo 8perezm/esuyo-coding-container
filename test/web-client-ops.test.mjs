@@ -13,14 +13,20 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const deployTabPath = path.join(root, 'web/client/src/components/ProjectDeployTab.tsx');
+const jobOutputPath = path.join(root, 'web/client/src/components/JobOutput.tsx');
 const imagesPath = path.join(root, 'web/client/src/pages/ImagesPage.tsx');
+const systemPath = path.join(root, 'web/client/src/pages/SystemPage.tsx');
+const projectsPath = path.join(root, 'web/client/src/pages/ProjectsPage.tsx');
 const setupPath = path.join(root, 'web/client/src/pages/SetupPage.tsx');
 const jobsPath = path.join(root, 'web/client/src/pages/JobsPage.tsx');
 const appPath = path.join(root, 'web/client/src/App.tsx');
 const sidebarPath = path.join(root, 'web/client/src/components/layout/Sidebar.tsx');
 
 const deployTab = await readFile(deployTabPath, 'utf8');
+const jobOutput = await readFile(jobOutputPath, 'utf8');
 const images = await readFile(imagesPath, 'utf8');
+const system = await readFile(systemPath, 'utf8');
+const projects = await readFile(projectsPath, 'utf8');
 const setup = await readFile(setupPath, 'utf8');
 const jobs = await readFile(jobsPath, 'utf8');
 const app = await readFile(appPath, 'utf8');
@@ -107,8 +113,10 @@ describe('JobsPage contract', () => {
     assert.match(jobs, /colSpan=\{6\}/);
     assert.match(jobs, /aria-expanded/);
     assert.match(jobs, /aria-controls/);
-    // toggling the same row collapses it again
-    assert.match(jobs, /prev === job\.id \? null : job\.id/);
+    // toggling writes ?job= to the URL (deep-link) and collapses on re-click
+    assert.match(jobs, /toggleJob/);
+    assert.match(jobs, /setSearchParams/);
+    assert.match(jobs, /selectedId === id \? null : id/);
     // closing stays closed: polling must not auto-select the first job
     assert.ok(!jobs.includes('list[0].id'), 'closing a row must stay closed, not re-open the first job');
     // no detached bottom card and no inner card box: detail lives flat in the row
@@ -125,6 +133,41 @@ describe('JobsPage contract', () => {
         tbody.indexOf('page-jobs-detail-logs') < tbody.indexOf('</TBody>'),
       'detail logs must render inside <TBody>',
     );
+  });
+
+  it('supports a ?job= deep-link that expands and scrolls to the job', () => {
+    assert.match(jobs, /useSearchParams/);
+    assert.match(jobs, /searchParams\.get\('job'\)/);
+    assert.match(jobs, /\{ job: next \}/);
+    assert.match(jobs, /scrollIntoView/);
+    assert.match(jobs, /page-jobs-detail-\$\{selectedId\}/);
+  });
+});
+
+describe('Trigger-page job notices (compact, no inline logs)', () => {
+  it('JobOutput renders status + deep-link with no log box', () => {
+    assert.ok(!jobOutput.includes('<pre'), 'trigger areas must not render an inline log <pre>');
+    assert.match(jobOutput, /\/jobs\?job=\$/);
+    assert.match(jobOutput, /View jobs/);
+    assert.match(jobOutput, /running, refreshing/);
+  });
+
+  it('Images and System pages render no inline log boxes', () => {
+    assert.ok(!images.includes('page-images-job-detail-logs'), 'Images page must not render inline logs');
+    assert.ok(!system.includes('page-system-init-job-detail-logs'), 'System page must not render inline logs');
+    assert.match(images, /\/jobs\?job=\$/);
+    assert.match(system, /\/jobs\?job=\$/);
+  });
+
+  it('Projects rows show a single compact notice (no duplicate started line)', () => {
+    assert.match(projects, /page-projects-row-job-notice/);
+    assert.ok(!projects.includes('page-projects-row-job-notice-link'), 'duplicate started line must be removed');
+    assert.ok(!projects.includes('to="/jobs"'), 'trigger links must deep-link with ?job=');
+  });
+
+  it('Deploy tab result links deep-link with ?job=', () => {
+    assert.match(deployTab, /\/jobs\?job=\$/);
+    assert.ok(!deployTab.includes('to="/jobs"'), 'deploy tab must not link to plain /jobs');
   });
 });
 

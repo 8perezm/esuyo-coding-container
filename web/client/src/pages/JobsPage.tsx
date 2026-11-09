@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api';
 import { formatDateTime, jobTone, shortId } from './job-helpers';
 import {
@@ -45,11 +46,20 @@ function errMsg(err: unknown): string {
 }
 
 export function JobsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('job'));
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Keep ?job= in sync when navigating back/forward to a deep-link.
+  const jobParam = searchParams.get('job');
+  useEffect(() => {
+    setSelectedId((prev) => (prev === jobParam ? prev : jobParam));
+    // Sync one-way from URL; manual toggles write the URL themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,11 +70,6 @@ export function JobsPage() {
         const list = Array.isArray(data) ? data : (data.jobs ?? []);
         setJobs(list);
         setListError(null);
-        setSelectedId((prev) => {
-          if (!prev) return prev;
-          if (list.some((j) => j.id === prev)) return prev;
-          return null;
-        });
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) {
@@ -81,6 +86,33 @@ export function JobsPage() {
       window.clearInterval(timer);
     };
   }, []);
+
+  // Drop a stale deep-link once the list is known.
+  useEffect(() => {
+    if (!jobs) return;
+    if (selectedId && !jobs.some((j) => j.id === selectedId)) {
+      setSelectedId(null);
+      setSearchParams({}, { replace: true });
+    }
+  }, [jobs, selectedId, setSearchParams]);
+
+  function toggleJob(id: string) {
+    const next = selectedId === id ? null : id;
+    setSelectedId(next);
+    setSearchParams(next ? { job: next } : {}, { replace: true });
+  }
+
+  // Scroll a deep-linked (or newly expanded) job into view once its row exists.
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!jobs?.some((j) => j.id === selectedId)) return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`page-jobs-detail-${selectedId}`)
+        ?.scrollIntoView({ block: 'center' });
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [selectedId, jobs]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -157,7 +189,7 @@ export function JobsPage() {
                         <button
                           data-ref="page-jobs-select-button"
                           type="button"
-                          onClick={() => setSelectedId((prev) => (prev === job.id ? null : job.id))}
+                          onClick={() => toggleJob(job.id)}
                           title={job.id}
                           aria-label={`${expanded ? 'Hide' : 'Show'} job ${job.id}`}
                           aria-expanded={expanded}

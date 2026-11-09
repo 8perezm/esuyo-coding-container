@@ -269,7 +269,7 @@ export function SshKeysPage() {
           {refreshJob ? (
             <p data-ref="page-ssh-keys-status-refresh" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
               Reload the aliases table above once the job finishes. Full history on the{' '}
-              <Link data-ref="page-ssh-keys-link-jobs-refresh" to="/jobs">jobs page</Link>.
+              <Link data-ref="page-ssh-keys-link-jobs-refresh" to={`/jobs?job=${encodeURIComponent(refreshJob.id)}`}>jobs page</Link>.
             </p>
           ) : null}
         </Card>
@@ -348,7 +348,7 @@ export function SshKeysPage() {
                 {rotateJob ? (
                   <p data-ref="page-ssh-keys-status-rotate" style={{ margin: '12px 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
                     The key details above may be stale until the job finishes; redeploy once it completes. Full history on the{' '}
-                    <Link data-ref="page-ssh-keys-link-jobs-rotate" to="/jobs">jobs page</Link>.
+                    <Link data-ref="page-ssh-keys-link-jobs-rotate" to={`/jobs?job=${encodeURIComponent(rotateJob.id)}`}>jobs page</Link>.
                   </p>
                 ) : null}
               </div>

@@ -141,9 +141,10 @@ describe('ProjectsPage contract', () => {
     assert.ok(projects.includes('projectId'), 'jobs must carry projectId');
   });
 
-  it('shows the returned job id with a link to /jobs', () => {
+  it('shows the returned job id via a compact JobOutput notice (deep-link lives in JobOutput)', () => {
     assert.match(projects, /jobNotice\.id/);
-    assert.ok(projects.includes('to="/jobs"'), 'missing link to /jobs');
+    assert.match(projects, /<JobOutput/);
+    assert.ok(!projects.includes('to="/jobs"'), 'row must not link to plain /jobs (JobOutput deep-links with ?job=)');
   });
 });
 
@@ -184,10 +185,10 @@ describe('ProjectDeployTab contract', () => {
     }
   });
 
-  it('disables buttons while submitting and shows the job id with a link to /jobs', () => {
+  it('disables buttons while submitting and shows the job id with a deep-link to /jobs?job=', () => {
     assert.match(deploy, /disabled=\{pending/);
     assert.match(deploy, /result\.id/);
-    assert.ok(deploy.includes('to="/jobs"'), 'missing link to /jobs');
+    assert.ok(deploy.includes('/jobs?job='), 'missing deep-link to /jobs?job=');
   });
 
   it('surfaces server errors via role=alert and notes global-mode build/push refusal', () => {
