@@ -129,7 +129,6 @@ interface TerminalPaneProps {
   projectId: string;
   tabId: string;
   active: boolean;
-  fillHeight: boolean;
   onConnChange: (tabId: string, state: ConnState, message: string | null) => void;
   registerHandle: (tabId: string, handle: SessionHandle | null) => void;
 }
@@ -144,7 +143,6 @@ function SshTerminalPane({
   projectId,
   tabId,
   active,
-  fillHeight,
   onConnChange,
   registerHandle,
 }: TerminalPaneProps) {
@@ -548,30 +546,31 @@ function SshTerminalPane({
     };
   }, [refitAndNotify]);
 
+  // The console fills the page, so its box also changes size without a window
+  // resize (e.g. the connection-details card appears or disappears). Refit
+  // whenever the measured container's box changes.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (activeRef.current) refitAndNotify();
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [refitAndNotify]);
+
   return (
     <div
-      style={
-        fillHeight
-          ? {
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              background: '#18181b',
-              padding: 2,
-              position: 'relative',
-              overflow: 'hidden',
-            }
-          : {
-              height: 480,
-              background: '#18181b',
-              padding: 8,
-              position: 'relative',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }
-      }
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#18181b',
+        padding: 2,
+        position: 'relative',
+        overflow: 'hidden',
+      }}
       onClick={() => {
         if (menu) setMenu(null);
       }}
@@ -861,7 +860,19 @@ export function SshTerminalPage() {
   }
 
   return (
-    <div data-ref="page-project-ssh">
+    <div
+      data-ref="page-project-ssh"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        // Fill the space under the fixed 60px header and the app shell's 24px
+        // vertical padding so the console uses the whole viewport, leaving no
+        // dead band below it. `minHeight` (not `height`) keeps the console
+        // flexible: content taller than the viewport (e.g. a wrapped header or
+        // an error card) grows the page and scrolls instead of being clipped.
+        minHeight: 'calc(100vh - 60px - 48px)',
+      }}
+    >
       <PageHeader
         title={projectName}
         description={
@@ -920,7 +931,7 @@ export function SshTerminalPage() {
                 background: '#18181b',
                 overflow: 'hidden',
               }
-            : undefined
+            : { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
         }
       >
       <Card
@@ -936,18 +947,21 @@ export function SshTerminalPage() {
                 flexDirection: 'column',
                 minHeight: 0,
               }
-            : { padding: 0, overflow: 'hidden' }
+            : {
+                padding: 0,
+                overflow: 'hidden',
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }
         }
         data-ref="page-project-ssh-terminal-card"
       >
         <Tabs
           value={activeId}
           onValueChange={setActiveId}
-          style={
-            isFullscreen
-              ? { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }
-              : undefined
-          }
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
           data-ref="page-project-ssh-tabs"
         >
         <div
@@ -1188,7 +1202,7 @@ export function SshTerminalPage() {
               // Flex only on the visible tab: an inline display would override
               // the `hidden` attribute that keeps background tabs out of view.
               style={
-                isFullscreen && t.id === activeId
+                t.id === activeId
                   ? { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }
                   : undefined
               }
@@ -1197,7 +1211,6 @@ export function SshTerminalPage() {
                 projectId={id}
                 tabId={t.id}
                 active={t.id === activeId}
-                fillHeight={isFullscreen}
                 onConnChange={handleConnChange}
                 registerHandle={registerHandle}
               />

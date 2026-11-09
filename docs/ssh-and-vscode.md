@@ -2,7 +2,7 @@
 
 How SSH access works, how to rotate keys, and how to connect from VS Code.
 
-Deploying a project registers an SSH alias named `coding-<project>` in your `~/.ssh/config`, inside a managed block the app owns. Removing the project removes the alias. You can see the result any time on the SSH and Keys page.
+Deploying a project registers an SSH alias named `coding-<project>` in your `~/.ssh/config`, inside a managed block the app owns. Removing the project removes the alias. You can see the result any time on the SSH and Keys page. Rootless projects use the same alias and NodePort, but connect as the project's non-root user; the container listens on port 2222 internally. See [Rootless containers](./rootless.md).
 
 ## See your connections
 

@@ -12,12 +12,14 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const mainPath = path.join(root, 'electron', 'main.js');
 const preloadPath = path.join(root, 'electron', 'preload.js');
 const builderPath = path.join(root, 'electron', 'electron-builder.yml');
+const rootPackagePath = path.join(root, 'package.json');
 const setupHtmlPath = path.join(root, 'electron', 'setup.html');
 const authPath = path.join(root, 'web', 'client', 'src', 'auth', 'RequireAuth.tsx');
 
 const main = await readFile(mainPath, 'utf8');
 const preload = await readFile(preloadPath, 'utf8');
 const builder = await readFile(builderPath, 'utf8');
+const rootPackage = JSON.parse(await readFile(rootPackagePath, 'utf8'));
 const auth = await readFile(authPath, 'utf8');
 
 describe('desktop first-run (main window)', () => {
@@ -41,6 +43,13 @@ describe('desktop first-run (main window)', () => {
     assert.ok(!preload.includes('desktopSetup'), 'preload must not expose a setup bridge');
     assert.ok(!preload.includes('desktop:save-setup'), 'preload must not call setup IPC');
     await assert.rejects(() => readFile(setupHtmlPath, 'utf8'), 'setup.html must be removed');
+  });
+
+  it('ships the Dockerfile and entrypoint script in both package forms', () => {
+    assert.ok(rootPackage.files.includes('Dockerfile'), 'npm package must include Dockerfile');
+    assert.ok(rootPackage.files.includes('entrypoint.sh'), 'npm package must include entrypoint.sh');
+    assert.ok(builder.includes('Dockerfile'), 'desktop bundle must include Dockerfile');
+    assert.ok(builder.includes('entrypoint.sh'), 'desktop bundle must include entrypoint.sh');
   });
 });
 

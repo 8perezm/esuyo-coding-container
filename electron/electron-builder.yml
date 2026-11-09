@@ -51,6 +51,7 @@ files:
     filter:
       - config.yaml
       - Dockerfile
+      - entrypoint.sh
   # Production dependencies only, allowlisted: an explicit node_modules
   # mapping bypasses the automatic devDependencies pruning, so only the
   # runtime closure is listed here (mirror electron/package.json

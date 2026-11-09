@@ -72,6 +72,12 @@ export function validate(cfg, { manifest = false } = {}) {
     `  cluster:   namespace ${cfg.k8s.namespace}, ${cfg.k8s.serviceType} port ${cfg.k8s.nodePort}` +
       (cfg.k8s.nodeName ? `, node ${cfg.k8s.nodeName}` : "")
   );
+  if (cfg.container?.root === false) {
+    console.log(
+      `  rootless:  user ${cfg.container.user} (uid ${cfg.container.uid}, gid ${cfg.container.gid}), ` +
+        `SSH port ${cfg.ssh.port}, key at ${cfg.container.home}/.ssh/authorized_keys`
+    );
+  }
   const secretKeys = secretEnvEntries(cfg).map(([name]) => name);
   if (secretKeys.length) {
     console.log(`  secrets:   ${secretKeys.join(", ")} (via Secret ${cfg.project}-env, values never shown)`);

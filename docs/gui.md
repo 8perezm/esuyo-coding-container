@@ -86,6 +86,8 @@ One environment file in the repo root, `.env`:
 
 On startup the server moves the legacy dev registry at `web/projects.json` into the shared store once, and adds a starter project when the registry is empty. The starter is a personal copy under the global folder, never the repo template. It is a small realistic app plus Postgres sidecar with free NodePorts already picked and clearly marked placeholder hosts and passwords.
 
+A project can opt into non-root coding containers from its Configuration tab with `container.root: false`. Existing projects keep the root default. See [Rootless containers](./rootless.md) for the NFS prerequisites and the no-`sudo` trade-off.
+
 ## See also
 
 - [Desktop](./desktop.md) for the installable wrapper around these pages

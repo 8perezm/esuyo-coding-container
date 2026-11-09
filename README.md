@@ -29,6 +29,7 @@ For private, internal Kubernetes clusters only. Do not expose to the public web.
 * SSH alias per project, ready for VS Code Remote SSH and for the browser terminal
 * Optional browser access to dev servers and sidecars for databases and queues
 * Shared team image with versioning, or a custom image per project, with your own Dockerfile for any language or toolchain
+* Optional rootless coding containers: run a project as a non-root user with no capabilities, while root projects keep their current behavior
 * Browser pages: dashboard with live workload status, project editor with checks, terminal in the browser, image publishing, and a job log for every task
 * Desktop app for Windows, macOS, and Linux: the same pages in an installable window with encrypted sign in and automatic updates
 * Shared project registry, so the browser and desktop views stay in sync
@@ -135,6 +136,7 @@ MIT. See [LICENSE](./LICENSE).
 * [Desktop app](./docs/desktop.md), installable shell around the pages
 * [Build and Deployment](./docs/build-and-deployment.md), npm releases, GUI bundle and installers
 * [Configuration](./docs/configuration.md), config layering, many projects and NAS volumes
+* [Rootless containers](./docs/rootless.md), non-root coding pods, NFS prerequisites and limits
 * [Environment variables and secrets](./docs/env-and-secrets.md), plain values plus secret handling with shell variables
 * [Shared global image](./docs/global-image.md), team image versions, publishing, rollback and cleanup
 * [Web access](./docs/web-access.md), browser access to dev servers with Traefik

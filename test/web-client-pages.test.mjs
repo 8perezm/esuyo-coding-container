@@ -247,6 +247,22 @@ describe('SshTerminalPage tabs contract', () => {
     );
   });
 
+  it('fills the space under the page header instead of using a fixed-height console', () => {
+    assert.ok(
+      terminal.includes('calc(100vh - 60px - 48px)'),
+      'page must fill the viewport area under the fixed 60px header and the 24px app padding',
+    );
+    assert.ok(!terminal.includes('height: 480'), 'console must not fall back to a fixed 480px box');
+    assert.ok(
+      terminal.includes("flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0"),
+      'terminal card and tabs must grow to fill the page',
+    );
+    assert.ok(
+      terminal.includes('ResizeObserver'),
+      'container size changes (e.g. the connection card appearing) must refit the console',
+    );
+  });
+
   it('reconnects and reports status for the active tab, and resets tabs between projects', () => {
     assert.ok(terminal.includes('reconnectActive'), 'header reconnect must target the active tab');
     assert.ok(terminal.includes('handleConnChange'), 'panes must report state for the tab status');
@@ -291,7 +307,7 @@ describe('SshTerminalPage tabs contract', () => {
   it('measures the terminal in a padding-free box so full-screen rows are not clipped', () => {
     // The xterm fit addon sizes the grid from the container's client size, so
     // padding on the measured element overestimates rows and leaves the last
-    // line half visible. The measured box must carry no padding; the 8px
+    // line half visible. The measured box must carry no padding; the small
     // visual padding lives on the outer wrapper.
     assert.ok(
       terminal.includes("style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}"),

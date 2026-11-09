@@ -33,6 +33,7 @@ Press Save in the editor, check the validation panel, then press Deploy to apply
 * **Optional NodePort for outside access.** Traefik Ingress routes HTTP to the coding container, so TCP services such as databases and queues cannot use `web.ports` for a sidecar port. Validation rejects a sidecar `containerPort` that duplicates the SSH port or any `web.ports` port. Add a `nodePort` in 30000 to 32767 to a sidecar port entry to expose it on every cluster node, for example `{ containerPort: 5432, name: postgres, nodePort: 30432 }`, then connect from your machine to `<node-ip>:30432`. The NodePort must be unique and different from the SSH NodePort. Deploy prints the resulting mapping in the job log.
 * **Collisions are rejected.** A sidecar port must not duplicate the SSH port or a `web.ports` port, and container names and ports must be unique across sidecars, otherwise the service port mapping would be unclear.
 * **Keep one replica.** `k8s.replicas` must stay `1`. Replicas would share the same NAS folder, so two stateful sidecars would clobber each other. The editor validation enforces this whenever `k8s.sidecars` is set.
+* **Rootless projects keep sidecars independent.** The rootless security context applies to the coding container only; each sidecar keeps its own `securityContext`. Sidecars still share the project's NFS export, so an all-squash rootless export maps their UID too. If a stateful sidecar needs a different UID, give the project a separate export or pre-create and chown its data folder. See [Rootless containers](./rootless.md).
 
 ## See also
 

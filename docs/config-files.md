@@ -2,7 +2,7 @@
 
 Where to put the setup and config files that tools like opencode and other apps expect, for example `~/.config/opencode/`, `~/.gitconfig` and dotfiles. This is about making those files survive while still landing where the app looks for them.
 
-> Status: proposal. The current `Dockerfile` entrypoint only recreates `/run/sshd`, republishes container env, and starts sshd. It does not link dotfiles yet.
+> Status: proposal. The current `entrypoint.sh` only recreates `/run/sshd`, republishes container env, and starts sshd. It does not link dotfiles yet.
 
 ## The core rule: only `/workspace` persists
 
@@ -29,9 +29,11 @@ The remaining question is simply how an app finds a file that it expects under `
 2. **At container start, the entrypoint would link each entry into place** (proposed, not yet built):
 
     ```
-    /root/.config/opencode -> /workspace/.dotfiles/.config/opencode
-    /root/.gitconfig       -> /workspace/.dotfiles/.gitconfig
+    <container.home>/.config/opencode -> /workspace/.dotfiles/.config/opencode
+    <container.home>/.gitconfig       -> /workspace/.dotfiles/.gitconfig
     ```
+
+    `<container.home>` is `/root` by default and `/home/ubuntu` in a rootless project.
 
     Use `ln -sfn`, and only create a link when the matching source exists under the dotfiles folder.
 
@@ -44,7 +46,7 @@ The remaining question is simply how an app finds a file that it expects under `
 
 ## Notes for builders, proposed
 
-The change would stay inside the `Dockerfile` entrypoint: add a small loop that links `/workspace/.dotfiles/*` into home. The NFS mount is available before the entrypoint runs, so timing is not a concern, and the links are cheap to recreate on every boot. Make the dotfiles folder configurable, defaulting to `/workspace/.dotfiles`.
+The change would stay inside `entrypoint.sh`: add a small loop that links `/workspace/.dotfiles/*` into home. The NFS mount is available before the entrypoint runs, so timing is not a concern, and the links are cheap to recreate on every boot. Make the dotfiles folder configurable, defaulting to `/workspace/.dotfiles`.
 
 ## Project scope or shared scope
 

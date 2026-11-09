@@ -30,3 +30,13 @@ k8s:
 # nfs:
 #   volumes:
 #     - { subPath: shared-datasets, mountPath: /data, readOnly: true }
+
+# Rootless (non-root) coding pods are opt-in per project. Uncomment and match
+# the image user (the shared image uses `ubuntu`, UID/GID 1000). Rootless
+# projects need a /workspace folder writable by that UID on the NAS, and SSH
+# moves to container port 2222 (the external NodePort stays the same):
+# container:
+#   user: ubuntu
+#   uid: 1000
+#   gid: 1000
+#   home: /home/ubuntu

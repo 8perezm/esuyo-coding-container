@@ -11,7 +11,7 @@ Published publicly from `main` or `master` by `.github/workflows/publish.yml`:
 3. `npm publish --access public`, then a GitHub release for the tag.
 4. Desktop job in the same run: build web GUI, sync electron version to the release, build NSIS plus MSIX plus portable and DMG plus ZIP and AppImage plus deb, upload artifacts, attach installers to the release.
 
-The published payload in `files` in `package.json` is `src`, `Dockerfile`, `opencode/`, and `config.yaml`. The binary is `coding-container` pointing at `src/index.js`. CI syncs `electron/package.json` version to the release tag, so you do not bump it by hand for releases.
+The published payload in `files` in `package.json` is `src`, `Dockerfile`, `entrypoint.sh`, `opencode/`, and `config.yaml`. The binary is `coding-container` pointing at `src/index.js`. CI syncs `electron/package.json` version to the release tag, so you do not bump it by hand for releases.
 
 Most people never install this package directly. It powers the Deploy, Publish and similar buttons in the app. When you want the shell form, see [Terminal use](./cli-reference.md).
 

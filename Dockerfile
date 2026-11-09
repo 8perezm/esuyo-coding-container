@@ -8,6 +8,9 @@
 #   EXTRA_APT_PACKAGES  Space separated list of extra apt packages
 #   EXTRA_NPM_PACKAGES  Space separated list of extra global npm packages
 #   INSTALL_PLAYWRIGHT  "true" (default) or "false"
+#   APP_USER/APP_UID/APP_GID  Non-root user for opt-in rootless projects
+#                              (default ubuntu/1000/1000, the base image user;
+#                              root pods ignore it)
 
 ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
@@ -16,6 +19,9 @@ ARG NODE_VERSION=26
 ARG EXTRA_APT_PACKAGES=""
 ARG EXTRA_NPM_PACKAGES=""
 ARG INSTALL_PLAYWRIGHT=true
+ARG APP_USER=ubuntu
+ARG APP_UID=1000
+ARG APP_GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/usr/lib/playwright-browsers
@@ -23,7 +29,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # --- Base tooling -----------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget gnupg git \
-        openssh-server \
+        openssh-server passwd \
         build-essential \
         htop vim nano less tree unzip zip rsync \
         jq fd-find ripgrep \
@@ -33,10 +39,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          || ln -sf /usr/bin/fdfind /usr/local/bin/fd ) \
     && rm -rf /var/lib/apt/lists/*
 
+# --- Non-root user (rootless mode) ------------------------------------------
+# One image serves both modes: root pods keep the historical root path and
+# rootless pods set runAsUser to this user. Tooling is installed for both
+# homes; the entrypoint branches on the effective UID at start.
+RUN if id -u "${APP_USER}" >/dev/null 2>&1; then \
+        existing_uid="$(id -u "${APP_USER}")"; existing_gid="$(id -g "${APP_USER}")"; \
+        if [ "$existing_uid" != "${APP_UID}" ] || [ "$existing_gid" != "${APP_GID}" ]; then \
+            echo "APP_USER ${APP_USER} exists as ${existing_uid}:${existing_gid}, not ${APP_UID}:${APP_GID}; pick matching build args" >&2; \
+            exit 1; \
+        fi; \
+    elif getent passwd "${APP_UID}" >/dev/null; then \
+        echo "APP_UID ${APP_UID} is already used by $(getent passwd "${APP_UID}" | cut -d: -f1); reuse that user name or pick a free APP_UID" >&2; \
+        exit 1; \
+    else \
+        if ! getent group "${APP_GID}" >/dev/null; then groupadd --gid "${APP_GID}" "${APP_USER}"; fi; \
+        useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --shell /bin/bash "${APP_USER}"; \
+    fi \
+    && mkdir -p "/home/${APP_USER}/.ssh" "/home/${APP_USER}/.config" "/home/${APP_USER}/.npm-global" \
+    && touch "/home/${APP_USER}/.ssh/authorized_keys" \
+    && chmod 700 "/home/${APP_USER}/.ssh" \
+    && chmod 600 "/home/${APP_USER}/.ssh/authorized_keys" \
+    && chown -R "${APP_UID}:${APP_GID}" "/home/${APP_USER}" \
+    && { gpasswd -d "${APP_USER}" sudo >/dev/null 2>&1 || true; }
+
 # --- Node.js (NodeSource) ---------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+# Rootless: send runtime `npm install -g` into the user's writable prefix.
+RUN su -l -s /bin/bash "${APP_USER}" -c 'npm config set prefix "$HOME/.npm-global"'
 
 # --- Package managers -------------------------------------------------------
 # corepack exposes pnpm/yarn (and npm) shims that honor each repo's
@@ -68,6 +100,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://opencode.ai/v2/install | bash
 ENV PATH="/root/.opencode/bin:${PATH}"
 RUN printf 'export PATH="/root/.opencode/bin:$PATH"\n' > /etc/profile.d/opencode.sh
+# Rootless: install the same CLI into the non-root user's home. The entrypoint
+# republishes the image PATH (which includes both homes) for SSH sessions.
+RUN su -l -s /bin/bash "${APP_USER}" -c 'curl -fsSL https://opencode.ai/v2/install | bash'
+# Keep the root path first so root sessions resolve the same binary as before.
+ENV PATH="/root/.opencode/bin:/home/${APP_USER}/.opencode/bin:${PATH}"
 # pi (pi.dev) - npm method per https://pi.dev/docs/latest/quickstart (installer
 # is interactive; npm is Docker-friendly). Requires Node >=22.19 (we install Node 26.x above).
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
@@ -101,31 +138,23 @@ RUN mkdir -p /root/.ssh && \
     sed -ri 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     sed -ri 's/^#?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
     ssh-keygen -A
-# /run may be a fresh tmpfs at start, so recreate the privsep dir at boot.
-# sshd builds each session's environment from scratch (USER/HOME/PATH/SHELL +
-# PAM), so the container's env (image ENV + pod spec) is not visible in SSH
-# sessions; the entrypoint republishes it for login shells.
-RUN cat > /entrypoint.sh <<'ENTRYPOINT' && sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
-#!/bin/bash
-mkdir -p /run/sshd
-: > /etc/profile.d/99-container-env.sh
-while IFS= read -r -d '' kv; do
-    name=${kv%%=*}
-    value=${kv#*=}
-    escaped=${value//"'"/"'\\''"}
-    printf "export %s='%s'\n" "$name" "$escaped"
-done < /proc/self/environ >> /etc/profile.d/99-container-env.sh
-exec /usr/sbin/sshd -D "$@"
-ENTRYPOINT
+# The entrypoint lives in ./entrypoint.sh. It branches on the effective UID:
+# root keeps the historical /run/sshd + /etc/profile.d path, a non-root user
+# starts its own sshd on CODING_CONTAINER_SSH_PORT (default 2222). The sed
+# keeps a Windows (CRLF) checkout from baking '\r' into the shebang.
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # --- Workspace --------------------------------------------------------------
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace && chown "${APP_UID}:${APP_GID}" /workspace
 
 # --- pi config --------------------------------------------------------------
 # Pre-create the default agent dir (~/.pi/agent) so tools like Herdr don't
 # warn about a missing extensions folder on first run. Pi creates these
 # lazily, so an empty dir is the correct "installed properly" state.
-RUN mkdir -p /root/.pi/agent/extensions /root/.pi/agent/skills /root/.pi/agent/prompts /root/.pi/agent/themes
+RUN mkdir -p /root/.pi/agent/extensions /root/.pi/agent/skills /root/.pi/agent/prompts /root/.pi/agent/themes \
+    && mkdir -p "/home/${APP_USER}/.pi/agent/extensions" "/home/${APP_USER}/.pi/agent/skills" "/home/${APP_USER}/.pi/agent/prompts" "/home/${APP_USER}/.pi/agent/themes" \
+    && chown -R "${APP_UID}:${APP_GID}" "/home/${APP_USER}/.pi"
 
 # --- opencode config (v2) -----------------------------------------------------
 # Server config (opencode.json) + terminal config (cli.json) + custom provider
@@ -136,12 +165,21 @@ COPY opencode/opencode.json /root/.config/opencode/opencode.json
 COPY opencode/cli.json /root/.config/opencode/cli.json
 COPY opencode/esuyo-opencode-custom-provider.json /root/.config/opencode/esuyo-opencode-custom-provider.json
 COPY opencode/agent /root/.config/opencode/agents
+# The same defaults for the non-root user, so rootless pods look identical.
+COPY opencode/opencode.json /home/${APP_USER}/.config/opencode/opencode.json
+COPY opencode/cli.json /home/${APP_USER}/.config/opencode/cli.json
+COPY opencode/esuyo-opencode-custom-provider.json /home/${APP_USER}/.config/opencode/esuyo-opencode-custom-provider.json
+COPY opencode/agent /home/${APP_USER}/.config/opencode/agents
+RUN chown -R "${APP_UID}:${APP_GID}" "/home/${APP_USER}/.config"
 
 WORKDIR /workspace
 # Land in /workspace on every interactive login
 RUN printf '\ncd /workspace 2>/dev/null || cd ~\n' >> /root/.bashrc \
-    && printf '\ncd /workspace 2>/dev/null || cd ~\n' >> /root/.profile
+    && printf '\ncd /workspace 2>/dev/null || cd ~\n' >> /root/.profile \
+    && printf '\ncd /workspace 2>/dev/null || cd ~\n' >> "/home/${APP_USER}/.bashrc" \
+    && printf '\ncd /workspace 2>/dev/null || cd ~\n' >> "/home/${APP_USER}/.profile" \
+    && chown "${APP_UID}:${APP_GID}" "/home/${APP_USER}/.bashrc" "/home/${APP_USER}/.profile"
 
-EXPOSE 22
+EXPOSE 22 2222
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const REPO_DOCKERFILE = path.join(PROJECT_ROOT, "Dockerfile");
+const REPO_ENTRYPOINT = path.join(PROJECT_ROOT, "entrypoint.sh");
 
 beforeEach(() => {
   process.env.XDG_CONFIG_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "dockerfile-crlf-xdg-"));
@@ -68,26 +69,27 @@ function customConfig(dockerfile, context) {
   );
 }
 
-test("repo Dockerfile strips CR from the generated /entrypoint.sh", () => {
+test("repo Dockerfile copies the entrypoint script and strips CR", () => {
   const content = fs.readFileSync(REPO_DOCKERFILE, "utf8");
   assert.ok(
-    content.includes("cat > /entrypoint.sh <<'ENTRYPOINT'"),
-    "expected the /entrypoint.sh heredoc to still exist"
+    content.includes("COPY entrypoint.sh /entrypoint.sh"),
+    "expected the Dockerfile to copy the entrypoint script from the build context"
   );
   assert.ok(
     content.includes("sed -i 's/\\r$//' /entrypoint.sh"),
     "expected the entrypoint step to strip carriage returns (CRLF-proof)"
   );
+  assert.ok(fs.existsSync(REPO_ENTRYPOINT), "the repo entrypoint script must exist");
 });
 
-test("the strip step repairs a CRLF-checked-out heredoc body", () => {
-  const content = fs.readFileSync(REPO_DOCKERFILE, "utf8").replaceAll("\r\n", "\n");
-  const body = content.split("<<'ENTRYPOINT'")[1].split("ENTRYPOINT")[0];
-  const crlfBody = body.replaceAll("\n", "\r\n");
-  assert.ok(crlfBody.includes("\r\n"), "simulated Windows checkout should contain CRLF");
+test("the entrypoint script is LF-only and survives a CRLF checkout", () => {
+  const content = fs.readFileSync(REPO_ENTRYPOINT, "utf8");
+  assert.ok(!content.includes("\r"), "the checked-in entrypoint script must be LF-only");
+  assert.ok(content.startsWith("#!/bin/bash\n"), "expected a LF-only bash shebang");
+  const crlfBody = content.replaceAll("\n", "\r\n");
   const repaired = crlfBody.replaceAll("\r\n", "\n");
   assert.ok(!repaired.includes("\r"), "CRLF->LF normalization must clear all CR");
-  assert.ok(repaired.includes("#!/bin/bash\n"), "shebang must be LF-only after repair");
+  assert.ok(repaired.startsWith("#!/bin/bash\n"), "shebang must be LF-only after repair");
 });
 
 test("buildImage normalizes a CRLF Dockerfile in place and builds", async () => {
@@ -168,6 +170,8 @@ test("setup normalizes an existing CRLF Dockerfile in place", async () => {
     // that can only produce a broken image.
     const existing = path.join(globalDir, "Dockerfile");
     fs.writeFileSync(existing, "FROM scratch\nRUN echo hi\n".replaceAll("\n", "\r\n"));
+    const existingEntrypoint = path.join(globalDir, "entrypoint.sh");
+    fs.writeFileSync(existingEntrypoint, "#!/bin/bash\necho hi\n".replaceAll("\n", "\r\n"));
 
     await setup({
       registry: "reg.example.com/you",
@@ -178,6 +182,11 @@ test("setup normalizes an existing CRLF Dockerfile in place", async () => {
 
     const content = fs.readFileSync(existing, "utf8");
     assert.equal(content, "FROM scratch\nRUN echo hi\n", "only line endings may change");
+    assert.equal(
+      fs.readFileSync(existingEntrypoint, "utf8"),
+      "#!/bin/bash\necho hi\n",
+      "an existing entrypoint script must be repaired to LF without content changes"
+    );
   } finally {
     if (prevKubectl === undefined) delete process.env.KUBECTL_BIN;
     else process.env.KUBECTL_BIN = prevKubectl;
@@ -204,13 +213,24 @@ test("setup provisions an LF-only Dockerfile", async () => {
       namespace: "coding",
     });
 
-    const provisioned = path.join(process.env.XDG_CONFIG_HOME, "coding-container", "Dockerfile");
+    const dir = path.join(process.env.XDG_CONFIG_HOME, "coding-container");
+    const provisioned = path.join(dir, "Dockerfile");
+    const entrypoint = path.join(dir, "entrypoint.sh");
     assert.ok(fs.existsSync(provisioned), "setup must provision a Dockerfile");
+    assert.ok(fs.existsSync(entrypoint), "setup must provision the entrypoint script");
     const content = fs.readFileSync(provisioned, "utf8");
     assert.ok(!content.includes("\r"), "provisioned Dockerfile must be LF-only");
     assert.ok(
+      content.includes("COPY entrypoint.sh /entrypoint.sh"),
+      "provisioned Dockerfile must copy the entrypoint script"
+    );
+    assert.ok(
       content.includes("sed -i 's/\\r$//' /entrypoint.sh"),
       "provisioned Dockerfile must carry the CRLF-proof entrypoint step"
+    );
+    assert.ok(
+      !fs.readFileSync(entrypoint, "utf8").includes("\r"),
+      "provisioned entrypoint must be LF-only"
     );
   } finally {
     if (prevKubectl === undefined) delete process.env.KUBECTL_BIN;
@@ -258,6 +278,14 @@ test("setup renders NODE_VERSION 26 and provisions opencode defaults", async () 
     assert.ok(
       cfgText.includes('NODE_VERSION: "26"'),
       "fresh global config must default to Node 26"
+    );
+    assert.ok(
+      cfgText.includes('APP_USER: "ubuntu"'),
+      "fresh global config must carry the rootless image user"
+    );
+    assert.ok(
+      cfgText.includes("# user: ubuntu") && cfgText.includes("# home: /home/ubuntu"),
+      "fresh global config must document the rootless opt-in"
     );
     for (const rel of [
       "opencode/opencode.json",

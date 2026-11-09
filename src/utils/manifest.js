@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import yaml from "js-yaml";
-import { imageRef } from "../config.js";
+import { authorizedKeysPath, imageRef } from "../config.js";
 
 function nfsBasePath(cfg) {
   return cfg.nfs.basePath.replace(/\/+$/, "");
@@ -160,6 +160,7 @@ export function sidecarNodePorts(cfg) {
 
 export function deploymentManifest(cfg, pullSecret = null) {
   const resources = cfg.k8s.resources || {};
+  const rootless = Number(cfg.container?.uid ?? 0) !== 0;
   const container = {
     name: "coding",
     image: imageRef(cfg),
@@ -178,7 +179,7 @@ export function deploymentManifest(cfg, pullSecret = null) {
       },
       {
         name: "ssh-keys",
-        mountPath: "/root/.ssh/authorized_keys",
+        mountPath: authorizedKeysPath(cfg),
         subPath: "authorized_keys",
       },
       ...extraVolumeMounts(cfg),
@@ -206,6 +207,25 @@ export function deploymentManifest(cfg, pullSecret = null) {
     ];
   }
   if (Object.keys(resources).length) container.resources = resources;
+
+  // Rootless mode: the coding container runs as a non-root UID with no
+  // capabilities and no way to regain them. It is container-level on purpose:
+  // sidecars keep their own securityContext. CODING_CONTAINER_SSH_PORT tells
+  // the entrypoint which port to start the non-root sshd on (default 2222).
+  if (rootless) {
+    container.securityContext = {
+      runAsNonRoot: true,
+      runAsUser: cfg.container.uid,
+      runAsGroup: cfg.container.gid,
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+      seccompProfile: { type: "RuntimeDefault" },
+    };
+    container.env = [
+      ...(container.env ?? []),
+      { name: "CODING_CONTAINER_SSH_PORT", value: String(cfg.ssh.port) },
+    ];
+  }
 
   const hash = secretsHash(cfg);
 

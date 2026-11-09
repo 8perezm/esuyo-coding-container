@@ -47,6 +47,11 @@ export const DEFAULTS = {
       NODE_VERSION: "26",
       EXTRA_APT_PACKAGES: "",
       EXTRA_NPM_PACKAGES: "",
+      // The image's non-root user, for opt-in rootless projects. Keep these
+      // in sync with container.user/uid/gid in rootless project configs.
+      APP_USER: "ubuntu",
+      APP_UID: "1000",
+      APP_GID: "1000",
     },
   },
   k8s: {
@@ -130,8 +135,115 @@ export const DEFAULTS = {
   container: {
     workdir: "/workspace",
     localPort: 2222,
+    // Simple switch: true keeps the historical root behavior, false runs
+    // the coding container as a non-root user (rootless mode). The
+    // user/uid/gid/home fields stay as the advanced path: root:false fills
+    // them with the shared image's ubuntu/1000 defaults, and an explicit
+    // value always wins (e.g. a NAS that maps a different UID).
+    // Rootless mode is opt-in per project: projects without it keep root.
+    // The image must contain the user; the shared Dockerfile uses the base
+    // image's `ubuntu` user (UID/GID 1000).
+    root: true,
+    user: "root",
+    uid: 0,
+    gid: 0,
+    home: "/root",
   },
 };
+
+/**
+ * Container path of the public key mount: <container.home>/.ssh/authorized_keys.
+ * Root mode keeps the historical /root location; rootless mode points at the
+ * non-root user's home. Hand-built test configs may omit container.home, so
+ * fall back to /root.
+ */
+export function authorizedKeysPath(cfg) {
+  const home = String(cfg?.container?.home || "/root").replace(/\/+$/, "") || "/root";
+  return `${home}/.ssh/authorized_keys`;
+}
+
+/**
+ * Resolve the rootless fields after the config layers merge, before validate():
+ * - container.root is the simple switch (default true). False selects
+ *   rootless mode with the shared image's ubuntu/1000 defaults;
+ * - a non-zero uid with no explicit root key also selects rootless mode,
+ *   so old `container.uid: 1000` configs keep working and read back as
+ *   root:false;
+ * - explicit user/uid/gid/home always win over the root-switch defaults
+ *   (the advanced path for a NAS that maps a different UID);
+ * - conflicting explicit values fail fast in normalize/validate instead of
+ *   silently flipping modes (e.g. root:true with a non-zero uid).
+ * - ssh.user follows container.user, because a non-root sshd can only
+ *   authenticate the user it runs as;
+ * - ssh.port defaults to 2222 because a non-root process cannot bind port 22.
+ * Root mode is untouched: root/0/0//root and the existing SSH values.
+ *
+ * @param {object} cfg merged config
+ * @param {object} [explicit] which container keys were set in the global,
+ *   project or override layers (DEFAULTS never counts as explicit).
+ */
+function normalizeContainer(cfg, explicit = {}) {
+  const c = cfg.container;
+  const { rootExplicit = false, uidExplicit = false } = explicit;
+  if (c.uid === undefined) c.uid = 0;
+  if (c.gid === undefined) c.gid = 0;
+
+  if (c.root === undefined) {
+    c.root = true;
+  } else if (!rootExplicit && c.root === true && c.uid !== 0) {
+    // Backward compat: an old `uid: 1000` config with no root key reads as
+    // rootless. An explicit `root: true` with a non-zero uid stays an error.
+    c.root = false;
+  }
+
+  if (c.root === false) {
+    if (uidExplicit && c.uid === 0) {
+      throw new Error(
+        "config: container.root is false but container.uid is 0 " +
+          "(rootless mode needs a non-zero uid; omit uid for the 1000 default)"
+      );
+    }
+    if (c.uid === 0) c.uid = 1000;
+    if (c.gid === 0) c.gid = c.uid;
+  } else if (c.root === true) {
+    if (c.uid !== 0 || c.gid !== 0) {
+      throw new Error(
+        "config: container.root is true but container.uid/gid is non-zero " +
+          "(root mode needs uid/gid 0; omit them or set container.root: false)"
+      );
+    }
+  }
+  if (c.uid === 0) {
+    if (!c.user) c.user = "root";
+    if (!c.home) c.home = "/root";
+    if (!cfg.ssh.user) cfg.ssh.user = "root";
+    return;
+  }
+
+  // Rootless. The defaults are the shared image's ubuntu user; a custom image
+  // overrides user/home/gid explicitly.
+  if (!c.user || c.user === "root") c.user = "ubuntu";
+  if (c.gid === 0) c.gid = c.uid;
+  if (!c.home || c.home === "/root") c.home = `/home/${c.user}`;
+  if (!cfg.ssh.user || cfg.ssh.user === "root") cfg.ssh.user = c.user;
+  if (cfg.ssh.port === 22) cfg.ssh.port = 2222;
+}
+
+/**
+ * Whether one raw config layer sets a container key explicitly. DEFAULTS
+ * never counts: only the global file, the project file and CLI overrides do.
+ * Needed so an old `container.uid: 1000` config with no root key infers
+ * root:false, while an explicit `container.root: true` with a non-zero uid
+ * fails instead of silently flipping modes.
+ */
+function hasContainerKey(layer, key) {
+  return !!(
+    layer &&
+    layer.container &&
+    typeof layer.container === "object" &&
+    Object.prototype.hasOwnProperty.call(layer.container, key)
+  );
+}
 
 function deepMerge(target, source) {
   for (const [key, value] of Object.entries(source)) {
@@ -224,12 +336,18 @@ export function loadConfig(configPath, overrides = {}, opts = {}) {
   const baseDefaults = structuredClone(DEFAULTS);
   baseDefaults.k8s.namespace = defaultNamespace();
   let cfg = withPaths(baseDefaults, localDir);
+  let globalRaw = {};
   if (fs.existsSync(gPath)) {
-    cfg = deepMerge(cfg, withPaths(readYaml(gPath), gDir));
+    globalRaw = readYaml(gPath);
+    cfg = deepMerge(cfg, withPaths(globalRaw, gDir));
   }
   const local = readYaml(resolved);
   cfg = deepMerge(cfg, withPaths(local, localDir));
   cfg = deepMerge(cfg, overrides);
+  normalizeContainer(cfg, {
+    rootExplicit: hasContainerKey(globalRaw, "root") || hasContainerKey(local, "root") || hasContainerKey(overrides, "root"),
+    uidExplicit: hasContainerKey(globalRaw, "uid") || hasContainerKey(local, "uid") || hasContainerKey(overrides, "uid"),
+  });
 
   const localImage = (local && local.image) || {};
   cfg.imageMode =
@@ -258,6 +376,88 @@ function validate(cfg) {
     throw new Error(
       `config: 'project' must be a valid k8s name (lowercase alphanum and '-'): ${cfg.project}`
     );
+  }
+  const container = cfg.container || {};
+  if (typeof container.root !== "boolean") {
+    throw new Error(
+      `config: container.root must be a boolean (true for root mode, false for rootless): ${JSON.stringify(container.root)}`
+    );
+  }
+  if (container.root === true && (container.uid !== 0 || container.gid !== 0)) {
+    throw new Error(
+      "config: container.root is true but container.uid/gid is non-zero " +
+        "(root mode needs uid/gid 0; omit them or set container.root: false)"
+    );
+  }
+  if (container.root === false && (container.uid === 0 || container.gid === 0)) {
+    throw new Error(
+      "config: container.root is false but container.uid/gid is 0 " +
+        "(rootless mode needs non-zero uid/gid; omit them for the 1000 default)"
+    );
+  }
+  if (
+    typeof container.user !== "string" ||
+    !/^[a-z_][a-z0-9_-]*$/.test(container.user)
+  ) {
+    throw new Error(
+      `config: container.user must be a valid Linux user name (lowercase a-z/0-9/_/-, starting with a letter or '_'): ${JSON.stringify(container.user)}`
+    );
+  }
+  for (const field of ["uid", "gid"]) {
+    if (!Number.isInteger(container[field]) || container[field] < 0) {
+      throw new Error(
+        `config: container.${field} must be a non-negative integer: ${JSON.stringify(container[field])}`
+      );
+    }
+  }
+  if ((container.uid === 0) !== (container.gid === 0)) {
+    throw new Error(
+      "config: container.uid and container.gid must both be 0 (root mode) or both non-zero (rootless mode)"
+    );
+  }
+  if (container.uid !== 0 && container.user === "root") {
+    throw new Error(
+      "config: container.user must be the image's non-root user when container.uid is non-zero"
+    );
+  }
+  if (
+    typeof container.home !== "string" ||
+    !container.home.startsWith("/") ||
+    container.home === "/" ||
+    container.home.endsWith("/") ||
+    container.home.split("/").slice(1).some((seg) => seg === "" || seg === "..")
+  ) {
+    throw new Error(
+      `config: container.home must be an absolute container path (no trailing '/', no empty or '..' segments): ${JSON.stringify(container.home)}`
+    );
+  }
+  if (
+    container.uid !== 0 &&
+    (container.home === "/root" || container.home.startsWith("/root/"))
+  ) {
+    throw new Error(
+      `config: container.home must not be under /root in rootless mode: ${container.home}`
+    );
+  }
+  if (!Number.isInteger(cfg.ssh.port) || cfg.ssh.port < 1 || cfg.ssh.port > 65535) {
+    throw new Error(
+      `config: ssh.port must be an integer in 1-65535: ${JSON.stringify(cfg.ssh.port)}`
+    );
+  }
+  if (typeof cfg.ssh.user !== "string" || !cfg.ssh.user) {
+    throw new Error("config: ssh.user must be a non-empty string");
+  }
+  if (container.uid !== 0) {
+    if (cfg.ssh.port < 1024) {
+      throw new Error(
+        "config: rootless containers cannot bind a privileged SSH port; set ssh.port to 2222 or higher"
+      );
+    }
+    if (cfg.ssh.user !== container.user) {
+      throw new Error(
+        `config: ssh.user must match container.user in rootless mode (${JSON.stringify(cfg.ssh.user)} != ${JSON.stringify(container.user)})`
+      );
+    }
   }
   if (!cfg.image.registry) {
     throw new Error(
@@ -305,7 +505,7 @@ function validate(cfg) {
       );
     }
     const workdir = cfg.container.workdir;
-    const sshKeyMount = "/root/.ssh/authorized_keys";
+    const sshKeyMount = authorizedKeysPath(cfg);
     const workspaceSub = cfg.nfs.subPath || cfg.project;
     const seenSubPaths = new Set();
     const seenMountPaths = new Set();
@@ -551,6 +751,11 @@ function validate(cfg) {
       }
       if (seenPorts.has(port)) {
         throw new Error(`config: web.ports lists port ${port} more than once`);
+      }
+      if (port === cfg.ssh.port) {
+        throw new Error(
+          `config: web.ports port ${port} collides with ssh.port (${cfg.ssh.port})`
+        );
       }
       seenPorts.add(port);
       const hosts = [];

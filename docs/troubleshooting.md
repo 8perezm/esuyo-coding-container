@@ -26,6 +26,12 @@ Almost always the NFS mount. A Kubernetes node cannot reach the NAS address, or 
 kubectl -n coding describe pod -l app=<project>
 ```
 
+**Rootless pod cannot write to `/workspace` or keeps restarting**
+The non-root UID does not match the NFS folder owner. Kubernetes ignores `fsGroup` for NFS, so the fix is on the NAS: use an export that maps all clients to the configured UID (`all_squash,anonuid=<uid>,anongid=<gid>`), or pre-create the project folder and `chown` it to that UID. Existing folders created by a root pod are still owned by the old mapped user and need a one-time ownership fix. Check the pod log; the entrypoint reports when it cannot use its home.
+
+**Rootless SSH is refused or logs in as the wrong user**
+Rootless projects run sshd on container port 2222, not 22. The external NodePort is unchanged, and `ssh.user` must match `container.user` (the app derives it). If the pod log shows sshd failing on keys or permissions, confirm `container.home` matches the user's home in the image and that the image contains that user. Rootless pods have no `sudo`.
+
 **Browser terminal says the session did not start in time**
 The pod is likely not running yet, or kubectl cannot reach the cluster. Check the Dashboard workload for the project and the Jobs log for the last deploy. A busy local port 2222 is no longer a problem, the app picks a free port automatically.
 

@@ -76,7 +76,7 @@ Background work lives in `src/commands/<name>.js`. The app exposes it as a job. 
 
 ## Change the image
 
-The repo `Dockerfile` is the packaged starting point. The Setup page copies it into the global config folder at `~/.config/coding-container/Dockerfile` on first run, plus the `opencode/` defaults for the image build, and that personal copy is what the build uses. Tweak your copy to change the image. It is yours alone and never gets committed to a project. To improve the starting point that every developer receives, edit the repo `Dockerfile` or files under `opencode/`. To expose a new knob:
+The repo `Dockerfile` is the packaged starting point. The Setup page copies it into the global config folder at `~/.config/coding-container/Dockerfile` on first run, along with `entrypoint.sh`, plus the `opencode/` defaults for the image build, and that personal copy is what the build uses. Tweak your copy to change the image. It is yours alone and never gets committed to a project. To improve the starting point that every developer receives, edit the repo `Dockerfile`, `entrypoint.sh` or files under `opencode/`. A custom build context that uses the repo Dockerfile must also contain `entrypoint.sh`, because the Dockerfile copies it. To expose a new knob:
 
 1. Add `ARG NAME=default` near the top.
 2. Use it in a `RUN`.
@@ -86,7 +86,7 @@ The build installs fail fast on purpose. Opencode, pi, herdr and turbo install w
 
 One knob exists in the Dockerfile but not in the shipped config templates: `INSTALL_PLAYWRIGHT` default true. Add `INSTALL_PLAYWRIGHT: "false"` to `image.buildArgs` in a config to skip the Playwright plus Chromium install for faster builds, a smaller image and no browser in the container.
 
-Packaging notes the current Dockerfile already handles: Ubuntu 26.04 ships `fd` as `/usr/bin/fdfind` and the symlink covers that plus `/usr/bin/fd-find` for other base images, opencode installs into `/root/.opencode/bin`, which is added to `PATH` with `ENV` and `/etc/profile.d` so non interactive shells see it, plus pi agent dirs and opencode defaults from `opencode/`. When you change `BASE_IMAGE`, recheck both.
+Packaging notes the current Dockerfile already handles: Ubuntu 26.04 ships `fd` as `/usr/bin/fdfind` and the symlink covers that plus `/usr/bin/fd-find` for other base images, opencode installs into `/root/.opencode/bin`, which is added to `PATH` with `ENV` and `/etc/profile.d` so non interactive shells see it, plus pi agent dirs and opencode defaults from `opencode/`. The same tooling is installed under the non-root user's home for rootless projects, and `entrypoint.sh` branches on the effective UID. When you change `BASE_IMAGE`, recheck both homes. Keep `APP_USER`/`APP_UID`/`APP_GID` in `image.buildArgs` in sync with `container.user`/`uid`/`gid`/`home` in rootless project configs.
 
 ## Debugging tips
 

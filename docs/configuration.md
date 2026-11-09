@@ -25,7 +25,7 @@ Real environment values win over `.env`, and `.env` never overwrites keys alread
 ## Layering, lowest to highest
 
 1. **Built in defaults:** sensible generic values. Environment specific ones such as registry, NFS server and NFS base path stay empty on purpose. The Setup page fills them.
-2. **Global config:** `~/.config/<leaf>/config.yaml`, created from the Setup page. Shared by every project: registry, image build, namespace, resources, NFS, SSH. Your SSH key pair lives next to it in `~/.config/<leaf>/keys`, the image `Dockerfile` is copied next to it during setup, and `opencode/` defaults are copied for the image build, so this config stays self contained and never points at the repo.
+2. **Global config:** `~/.config/<leaf>/config.yaml`, created from the Setup page. Shared by every project: registry, image build, namespace, resources, NFS, SSH. Your SSH key pair lives next to it in `~/.config/<leaf>/keys`, the image `Dockerfile` and its `entrypoint.sh` are copied next to it during setup, and `opencode/` defaults are copied for the image build, so this config stays self contained and never points at the repo.
    The namespace is a naming convention, not access control. Use one name per developer for private work, or one shared name for a team. Every coding area namespace carries the `coding-container=true` label and its registry and NFS values are filled from namespace notes with live workload fallback.
 3. **Project config:** the YAML you edit in a project page. It holds only what differs per project:
 
@@ -55,6 +55,9 @@ image:
     NODE_VERSION: "26"
     EXTRA_APT_PACKAGES: ""     # for example "tmux sqlite3"
     EXTRA_NPM_PACKAGES: ""     # for example "pnpm yarn"
+    APP_USER: "ubuntu"         # non-root user for opt-in rootless projects
+    APP_UID: "1000"
+    APP_GID: "1000"
 
 k8s:
   namespace: coding
@@ -87,6 +90,11 @@ ssh:
 container:
   workdir: /workspace
   localPort: 2222              # local port used for direct SSH sessions
+  root: true                   # false runs the coding container as a non-root user (rootless mode)
+  user: root                   # rootless projects use a non-root user (ubuntu by default)
+  uid: 0                       # root:false defaults to uid/gid 1000; set all four for a different NAS UID
+  gid: 0
+  home: /root                  # key mount is <home>/.ssh/authorized_keys
 ```
 
 ## Working on many projects
@@ -102,6 +110,38 @@ k8s:
 ```
 
 Then attach that file on the Projects import page and press Deploy. Each project gets its own pod, service and NAS subfolder such as `/workspaces/my-api`. Global mode projects share the same image and by default the same key pair. Custom mode projects build their own image, `registry/coding-<project>` unless `image.name` is set, and `ssh.keyDir` gives a project its own key pair.
+
+## Rootless containers
+
+A project can run its coding container as a non-root user instead of root. This is opt-in and configured in the project `config.yaml` with a simple switch; projects without it keep the current root behavior (`root: true` is the default).
+
+```yaml
+project: my-api
+
+container:
+  root: false
+```
+
+That is the whole setup for the shared image: the app runs the container as `ubuntu` (UID/GID 1000), renders `runAsNonRoot`, `runAsUser`/`runAsGroup`, no privilege escalation, no capabilities and a `RuntimeDefault` seccomp profile on the coding container only. It mounts the public key at `<home>/.ssh/authorized_keys` and moves SSH to container port 2222, because a non-root process cannot bind port 22. `ssh.user` follows `container.user` and `ssh.port` defaults to 2222. The external NodePort is unchanged.
+
+The `container.user`/`uid`/`gid`/`home` fields stay as the advanced path for images or NAS shares that need a different UID:
+
+```yaml
+project: my-api
+
+container:
+  root: false
+  user: alice
+  uid: 2001
+  gid: 2001
+  home: /home/alice
+```
+
+An explicit value always wins over the `root: false` defaults, and conflicting values fail fast (`root: true` with a non-zero `uid`, or `root: false` with `uid: 0`). Old configs that set a non-zero `container.uid` without the switch keep working and read back as `root: false`.
+
+Rootless needs an NFS folder writable by the configured UID. The recommended setup is a dedicated export that maps all clients to that UID, with an `nfs.server`/`nfs.basePath` override on the rootless projects. `fsGroup` does not work on NFS. Existing folders created under root squash need a one-time `chown` on the NAS. Rootless projects also cannot use `sudo` or install system packages at runtime; add those packages to the image.
+
+See [Rootless containers](./rootless.md) for the full image, NAS and sidecar details.
 
 ## The shared projects registry
 
@@ -146,7 +186,7 @@ nfs:
 ```
 
 * **Same share, subfolders only.** `subPath` must be a relative folder name under `nfs.basePath` with no leading slash and no empty or parent segments. It must not collide with the `/workspace` folder and must be unique across entries. A missing folder is created on first mount, like the project workspace folder.
-* **`mountPath` is a container path.** It must be absolute with no trailing slash except root and no empty or parent segments. It must not be `/workspace` or anything under it, must not be `/root/.ssh/authorized_keys`, and entries must not nest inside or duplicate each other.
+* **`mountPath` is a container path.** It must be absolute with no trailing slash except root and no empty or parent segments. It must not be `/workspace` or anything under it, must not be the SSH key path (`/root/.ssh/authorized_keys`, or `<container.home>/.ssh/authorized_keys` in a rootless project), and entries must not nest inside or duplicate each other.
 * **`readOnly`:** when true, the container cannot write to the mount. Omit it or set false for a writable mount.
 * **Only the coding container gets the mounts.** A sidecar that needs the same data references the `workspace` volume with its own `subPath` in its `volumeMounts`, see ./sidecars.md.
 * Changes apply on the next Deploy. Removing an entry unmounts the folder, and nothing on the NAS is ever deleted by the app.

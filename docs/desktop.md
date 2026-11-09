@@ -44,7 +44,7 @@ This gives you NSIS plus MSIX plus portable on Windows, DMG plus ZIP on macOS, a
 
 ## Packaging notes
 
-* `electron-builder.yml` bundles with `asar: false` so the backend keeps real files for background tasks and for Dockerfile and config lookup. It packs the main, preload and launcher files, `src`, `web/server`, the built `web/client/dist`, root `config.yaml` plus `Dockerfile` and `opencode/`, and a curated production `node_modules` set. The root `package.json` is not bundled. The desktop manifest at the bundle root carries the version synced by CI.
+* `electron-builder.yml` bundles with `asar: false` so the backend keeps real files for background tasks and for Dockerfile and config lookup. It packs the main, preload and launcher files, `src`, `web/server`, the built `web/client/dist`, root `config.yaml` plus `Dockerfile`, `entrypoint.sh` and `opencode/`, and a curated production `node_modules` set. The root `package.json` is not bundled. The desktop manifest at the bundle root carries the version synced by CI.
 * CI syncs `electron/package.json` version to the release tag, so you do not bump it by hand for releases.
 * The `msix` block uses placeholder identity values. Replace them with your Partner Center values before a Microsoft Store submission. Store installs update through the Store. The NSIS build updates from GitHub releases.
 * `electron-builder` is pinned to `27.0.0-alpha.10`, the first line with the `msix` target. Move to stable v27 when it lands.

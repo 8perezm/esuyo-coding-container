@@ -51,7 +51,7 @@ Every `coding-container` command and its most useful flags.
 
 | Command | What it does |
 |---|---|
-| `coding-container setup` | One time: create the global config plus Dockerfile plus SSH key pair, never overwrites |
+| `coding-container setup` | One time: create the global config plus Dockerfile plus entrypoint plus SSH key pair, never overwrites |
 | `coding-container create` | Deploy the project, the full pipeline, registers an SSH alias in `~/.ssh/config`. Global mode: deploys the shared image. Custom mode: builds plus pushes the project image first |
 | `coding-container build` | Build the project custom image. For global mode projects use `system create` |
 | `coding-container push` | Push the project custom image. For global mode projects use `system create` |

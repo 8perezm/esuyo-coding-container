@@ -105,6 +105,11 @@ image:
     NODE_VERSION: "26"
     EXTRA_APT_PACKAGES: ""
     EXTRA_NPM_PACKAGES: ""
+    # Non-root user baked into the image for opt-in rootless projects.
+    # Keep these in sync with container.user/uid/gid in those projects.
+    APP_USER: "ubuntu"
+    APP_UID: "1000"
+    APP_GID: "1000"
 
 k8s:
   namespace: ${yamlValue(values.namespace)}
@@ -142,27 +147,35 @@ ssh:
   keyName: id_ed25519
   # keyDir intentionally unset: keys default to ./keys next to this file.
   # Set ssh.keyDir in a project config to keep a per-project key pair instead.
+  # In rootless projects ssh.user follows container.user and ssh.port
+  # defaults to 2222 (a non-root process cannot bind port 22).
 
 container:
   workdir: /workspace
   localPort: 2222
+  # Rootless is opt-in per project: set root: false in the project config.
+  # That selects the shared image's ubuntu user (uid/gid 1000); the commented
+  # values below are the advanced path for a different UID, see docs/rootless.md.
+  root: true
+  # user: ubuntu
+  # uid: 1000
+  # gid: 1000
+  # home: /home/ubuntu
 `;
 }
 
-// Copy the Dockerfile from the repo into the global folder (the build context)
-// and add a .dockerignore so the SSH keys / this config never enter the build
-// context. Existing files are never overwritten. The copy is normalized to
-// Unix (LF) line endings: a Windows (CRLF) checkout would otherwise bake
-// '\r' into /entrypoint.sh via the Dockerfile heredoc, and the image then
-// fails at boot with `exec /entrypoint.sh: no such file or directory`
-// (the kernel looks for the interpreter `/bin/bash\r`).
-function provisionDockerfile(dir) {
-  const dst = path.join(dir, "Dockerfile");
+// Copy one repo file into the build context, or normalize an existing copy
+// without overwriting user edits. The copy is normalized to Unix (LF) line
+// endings: a Windows (CRLF) checkout would otherwise bake '\r' into
+// /entrypoint.sh and the image fails at boot with
+// `exec /entrypoint.sh: no such file or directory` (the kernel looks for the
+// interpreter `/bin/bash\r`).
+function provisionFile(dir, filename) {
+  const dst = path.join(dir, filename);
   if (fs.existsSync(dst)) {
-    // An existing Dockerfile from an older setup may carry Windows (CRLF)
-    // line endings, which would bake '\r' into /entrypoint.sh. Normalizing
-    // is content-preserving for the build, so repair it in place rather
-    // than leaving a file that can only produce a broken image.
+    // An older setup may have provisioned a CRLF copy. Normalizing is
+    // content-preserving for the build, so repair it in place rather than
+    // leaving a file that can only produce a broken image.
     const existing = fs.readFileSync(dst, "utf8");
     if (existing.includes("\r")) {
       fs.writeFileSync(dst, existing.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
@@ -171,11 +184,20 @@ function provisionDockerfile(dir) {
       console.log(`kept:    ${dst} (already exists, left untouched)`);
     }
   } else {
-    const src = path.join(PROJECT_ROOT, "Dockerfile");
+    const src = path.join(PROJECT_ROOT, filename);
     const content = fs.readFileSync(src, "utf8").replaceAll("\r\n", "\n");
     fs.writeFileSync(dst, content);
     console.log(`created: ${dst} (copied from the repo)`);
   }
+  return dst;
+}
+
+// The Dockerfile and its entrypoint script form the build context, plus a
+// .dockerignore so the SSH keys / this config never enter it. Existing files
+// are never overwritten.
+function provisionBuildContext(dir) {
+  provisionFile(dir, "Dockerfile");
+  provisionFile(dir, "entrypoint.sh");
   const ignore = path.join(dir, ".dockerignore");
   if (!fs.existsSync(ignore)) {
     fs.writeFileSync(ignore, "keys/\nconfig.yaml\n*.pem\n");
@@ -295,7 +317,7 @@ export async function setup(opts = {}) {
   const dir = globalConfigDir();
   fs.mkdirSync(dir, { recursive: true });
 
-  provisionDockerfile(dir);
+  provisionBuildContext(dir);
   provisionOpencode(dir);
 
   const cfgFile = globalConfigPath();
