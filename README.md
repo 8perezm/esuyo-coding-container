@@ -152,3 +152,5 @@ MIT. See [LICENSE](./LICENSE).
 * [Windows setup](./docs/windows-setup.md), Docker, kubectl, K3s, registry and kubeconfig on Windows
 * [Plan: Additional NFS volumes](./docs/build/additional-volumes.md), design history for extra volumes
 * [Plan: Public prebuilt images](./docs/build/public-images.md), design history for public images
+
+--
